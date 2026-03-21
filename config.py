@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     morning_reminder_hour: int = Field(default=8, alias="MORNING_REMINDER_HOUR")
     evening_reminder_hour: int = Field(default=20, alias="EVENING_REMINDER_HOUR")
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "populate_by_name": True}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "populate_by_name": True, "extra": "ignore"}
 
 
 settings = Settings()
