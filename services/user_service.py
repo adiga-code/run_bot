@@ -68,7 +68,12 @@ class UserService:
         return start, end
 
     async def all_active(self) -> list[User]:
+        """Returns users whose program is running (status=active)."""
         result = await self.session.execute(
-            select(User).where(User.is_active == True, User.onboarding_complete == True)
+            select(User).where(
+                User.is_active == True,
+                User.onboarding_complete == True,
+                User.status == "active",
+            )
         )
         return list(result.scalars().all())

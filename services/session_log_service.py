@@ -69,19 +69,26 @@ class SessionLogService:
         return result.scalar_one()
 
     async def streak(self, user_id: int) -> int:
-        """Consecutive days without a skip (from today backwards)."""
+        """
+        Consecutive days the user engaged with the bot (did check-in).
+        Counts backwards from today; breaks on the first calendar day with no check-in.
+        Recovery / skipped / rest days all count as long as check-in was done.
+        """
+        from datetime import date, timedelta
+
         result = await self.session.execute(
-            select(SessionLog)
+            select(SessionLog.date)
             .where(SessionLog.user_id == user_id, SessionLog.checkin_done == True)
             .order_by(SessionLog.date.desc())
         )
-        logs = list(result.scalars().all())
-        streak = 0
-        for log in logs:
-            if log.completion_status == "skipped":
-                break
-            streak += 1
-        return streak
+        checkin_dates = {row[0] for row in result.fetchall()}
+
+        count = 0
+        expected = date.today()
+        while expected in checkin_dates:
+            count += 1
+            expected -= timedelta(days=1)
+        return count
 
     async def week_completion_rate(
         self, user_id: int, week_start_day: int, week_end_day: int

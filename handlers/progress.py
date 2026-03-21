@@ -25,6 +25,14 @@ async def _send_progress(target, user_id: int, session: AsyncSession) -> None:
             await target.answer(text)
         return
 
+    if user.status != "active":
+        text = "⏳ Ожидаем подтверждения тренера. Как только уровень будет подтверждён — программа начнётся!"
+        if isinstance(target, CallbackQuery):
+            await target.answer(text, show_alert=True)
+        else:
+            await target.answer(text)
+        return
+
     day = await user_svc.current_program_day(user) or 1
     completed = await log_svc.completed_count(user_id)
     streak = await log_svc.streak(user_id)

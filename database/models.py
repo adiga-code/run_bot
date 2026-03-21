@@ -46,6 +46,8 @@ class User(Base):
     # Access & lifecycle
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     onboarding_complete: Mapped[bool] = mapped_column(Boolean, default=False)
+    # pending = ждёт подтверждения тренера; active = программа запущена
+    status: Mapped[str] = mapped_column(String(20), default="pending", server_default="active")
     role: Mapped[str] = mapped_column(String(20), default="athlete")  # athlete / admin (reserved)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

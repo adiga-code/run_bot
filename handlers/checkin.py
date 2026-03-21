@@ -10,9 +10,9 @@ from engine.red_flags import CheckinData
 from engine.rule_engine import decide_workout_version
 from keyboards.builders import (
     kb_main_menu, kb_pain_checkin, kb_pain_increases_checkin,
-    kb_sleep, kb_stress, kb_wellbeing,
+    kb_sleep, kb_stress, kb_wellbeing, kb_strength_day_options,
 )
-from handlers.utils import safe_answer
+from handlers.utils import safe_answer, filter_strength_text
 from services.session_log_service import SessionLogService
 from services.user_service import UserService
 from services.workout_service import WorkoutService
@@ -53,6 +53,13 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
     user = await user_svc.get(callback.from_user.id)
     if not user or not user.onboarding_complete:
         await safe_answer(callback, text="Сначала пройди онбординг.", show_alert=True)
+        return
+    if user.status != "active":
+        await safe_answer(
+            callback,
+            text="⏳ Ожидаем подтверждения тренера. Как только уровень будет подтверждён — программа начнётся!",
+            show_alert=True,
+        )
         return
 
     log_svc = SessionLogService(session)
@@ -206,11 +213,13 @@ async def _finish_checkin(
 
     if workout:
         micro = f"\n\n💡 <i>{workout.micro_learning}</i>" if workout.micro_learning else ""
+        workout_text = filter_strength_text(workout.text, user.strength_format if day_type == "strength" else None)
+        is_strength = day_type == "strength" and decision.version != "recovery"
         await callback.message.answer(
             f"📋 <b>День {day_index} из 28 — {workout.title}</b>\n\n"
-            f"{workout.text}{micro}",
+            f"{workout_text}{micro}",
             parse_mode="HTML",
-            reply_markup=kb_main_menu(),
+            reply_markup=kb_strength_day_options() if is_strength else kb_main_menu(),
         )
     else:
         await callback.message.answer(

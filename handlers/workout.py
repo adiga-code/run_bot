@@ -5,7 +5,7 @@ from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from handlers.utils import safe_answer
-from keyboards.builders import kb_completion, kb_effort, kb_had_pain, kb_main_menu
+from keyboards.builders import kb_completion, kb_effort, kb_had_pain, kb_main_menu, kb_strength_day_options
 from services.session_log_service import SessionLogService
 
 router = Router()
@@ -23,6 +23,16 @@ class WorkoutStates(StatesGroup):
     had_pain = State()
 
 
+BASIC_WORKOUT_TEXT = (
+    "🏃 <b>Базовая тренировка:</b>\n\n"
+    "- Приседания — 3×15\n"
+    "- Отжимания — 3×10\n"
+    "- Выпады — 3×10/нога\n"
+    "- Планка — 3×30 сек\n"
+    "- Скручивания — 3×15"
+)
+
+
 @router.callback_query(F.data == "wk:mark")
 async def cb_mark_start(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(WorkoutStates.completion)
@@ -30,6 +40,18 @@ async def cb_mark_start(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await callback.message.answer(
         "Как прошла тренировка?",
+        reply_markup=kb_completion(),
+    )
+
+
+@router.callback_query(F.data == "wk:custom")
+async def cb_custom_workout(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.message.edit_reply_markup()
+    await safe_answer(callback)
+    await state.set_state(WorkoutStates.completion)
+    await callback.message.answer(
+        f"{BASIC_WORKOUT_TEXT}\n\nОтметь результат после выполнения:",
+        parse_mode="HTML",
         reply_markup=kb_completion(),
     )
 

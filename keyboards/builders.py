@@ -166,6 +166,47 @@ def kb_had_pain() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+# ── Admin approval ────────────────────────────────────────────────────────────
+
+def kb_admin_approve(user_id: int, level: int) -> InlineKeyboardMarkup:
+    """Sent to admin when a new user completes onboarding."""
+    level_names = {1: "Start", 2: "Return", 3: "Base", 4: "Stability", 5: "Performance"}
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=f"✅ Подтвердить уровень {level} — {level_names[level]}",
+        callback_data=f"adm:approve:{user_id}:{level}",
+    )
+    builder.button(
+        text="✏️ Изменить уровень",
+        callback_data=f"adm:pick:{user_id}",
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_admin_level_picker(user_id: int) -> InlineKeyboardMarkup:
+    """Level selector for admin to override auto-detected level."""
+    level_names = {1: "Start", 2: "Return", 3: "Base", 4: "Stability", 5: "Performance"}
+    builder = InlineKeyboardBuilder()
+    for lvl, name in level_names.items():
+        builder.button(text=f"{lvl} — {name}", callback_data=f"adm:setlvl:{user_id}:{lvl}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+# ── Strength day options ──────────────────────────────────────────────────────
+
+def kb_strength_day_options() -> InlineKeyboardMarkup:
+    """Shown after strength workout is displayed: mark it or do a custom workout."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Отметить тренировку", callback_data="wk:mark")
+    builder.button(text="🔄 Сделаю свою тренировку", callback_data="wk:custom")
+    builder.button(text="📊 Мой прогресс", callback_data="menu:progress")
+    builder.button(text="🔔 Напоминания", callback_data="menu:reminders")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 # ── Progress / Main menu ──────────────────────────────────────────────────────
 
 def kb_main_menu() -> InlineKeyboardMarkup:
