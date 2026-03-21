@@ -47,7 +47,7 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     onboarding_complete: Mapped[bool] = mapped_column(Boolean, default=False)
     role: Mapped[str] = mapped_column(String(20), default="athlete")  # athlete / admin (reserved)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     session_logs: Mapped[list["SessionLog"]] = relationship(back_populates="user")
 
@@ -108,7 +108,7 @@ class SessionLog(Base):
     evening_sent: Mapped[bool] = mapped_column(Boolean, default=False)
     checkin_done: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     user: Mapped["User"] = relationship(back_populates="session_logs")
     workout: Mapped["Workout | None"] = relationship()
@@ -120,4 +120,4 @@ class WhitelistEntry(Base):
     telegram_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     added_by: Mapped[int] = mapped_column(BigInteger)
     note: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
