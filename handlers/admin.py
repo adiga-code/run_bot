@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from handlers.utils import safe_answer
-from keyboards.builders import kb_admin_approve, kb_admin_level_picker, kb_main_menu
+from keyboards.builders import kb_admin_approve, kb_admin_level_picker, kb_admin_menu, kb_main_menu
 from services.user_service import UserService
 from services.whitelist_service import WhitelistService
 
@@ -18,6 +18,107 @@ LEVEL_NAMES = {1: "Start", 2: "Return", 3: "Base", 4: "Stability", 5: "Performan
 
 def is_admin(user_id: int) -> bool:
     return user_id in settings.admin_ids
+
+
+# ── /admin menu ────────────────────────────────────────────────────────────────
+
+@router.message(Command("admin"))
+async def cmd_admin(message: Message) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    await message.answer(
+        "🛠 <b>Панель администратора</b>",
+        parse_mode="HTML",
+        reply_markup=kb_admin_menu(),
+    )
+
+
+@router.callback_query(F.data == "adm:menu:pending")
+async def cb_admin_pending(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    from sqlalchemy import select
+    from database.models import User
+
+    result = await session.execute(
+        select(User).where(User.status == "pending", User.onboarding_complete == True)
+    )
+    users = list(result.scalars().all())
+
+    if not users:
+        await callback.message.answer(
+            "✅ Нет пользователей, ожидающих подтверждения.",
+            reply_markup=kb_admin_menu(),
+        )
+        return
+
+    await callback.message.answer(f"⏳ Ожидают подтверждения: <b>{len(users)}</b>", parse_mode="HTML")
+    for u in users:
+        level_name = LEVEL_NAMES.get(u.level, "?")
+        await callback.message.answer(
+            f"👤 <b>{u.full_name}</b>\n"
+            f"ID: <code>{u.telegram_id}</code>\n"
+            f"Уровень: <b>{level_name} ({u.level})</b>",
+            parse_mode="HTML",
+            reply_markup=kb_admin_approve(u.telegram_id, u.level),
+        )
+
+
+@router.callback_query(F.data == "adm:menu:stats")
+async def cb_admin_stats(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    user_svc = UserService(session)
+    users = await user_svc.all_active()
+
+    level_counts = {k: 0 for k in LEVEL_NAMES}
+    for u in users:
+        if u.level in level_counts:
+            level_counts[u.level] += 1
+
+    level_lines = "\n".join(
+        f"  Level {lvl} ({name}): {level_counts[lvl]}"
+        for lvl, name in LEVEL_NAMES.items()
+    )
+    await callback.message.answer(
+        f"<b>Статистика бота</b>\n\n"
+        f"Активных пользователей: <b>{len(users)}</b>\n\n"
+        f"По уровням:\n{level_lines}",
+        parse_mode="HTML",
+        reply_markup=kb_admin_menu(),
+    )
+
+
+@router.callback_query(F.data == "adm:menu:whitelist")
+async def cb_admin_whitelist(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    wl_svc = WhitelistService(session)
+    entries = await wl_svc.list_all()
+
+    if not entries:
+        await callback.message.answer("Whitelist пуст.", reply_markup=kb_admin_menu())
+        return
+
+    lines = [f"<b>Whitelist ({len(entries)} пользователей):</b>\n"]
+    for e in entries:
+        note = f" — {e.note}" if e.note else ""
+        lines.append(f"• <code>{e.telegram_id}</code>{note}")
+
+    await callback.message.answer(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb_admin_menu(),
+    )
 
 
 # ── Whitelist management ───────────────────────────────────────────────────────

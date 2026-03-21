@@ -168,6 +168,15 @@ def kb_had_pain() -> InlineKeyboardMarkup:
 
 # ── Admin approval ────────────────────────────────────────────────────────────
 
+def kb_admin_menu() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⏳ Ожидающие подтверждения", callback_data="adm:menu:pending")
+    builder.button(text="📊 Статистика", callback_data="adm:menu:stats")
+    builder.button(text="👥 Whitelist", callback_data="adm:menu:whitelist")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def kb_admin_approve(user_id: int, level: int) -> InlineKeyboardMarkup:
     """Sent to admin when a new user completes onboarding."""
     level_names = {1: "Start", 2: "Return", 3: "Base", 4: "Stability", 5: "Performance"}
@@ -190,6 +199,16 @@ def kb_admin_level_picker(user_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for lvl, name in level_names.items():
         builder.button(text=f"{lvl} — {name}", callback_data=f"adm:setlvl:{user_id}:{lvl}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+# ── Evening reminder mark button ──────────────────────────────────────────────
+
+def kb_mark_workout() -> InlineKeyboardMarkup:
+    """Single button for evening reminder — triggers the completion FSM."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Отметить тренировку", callback_data="wk:mark")
     builder.adjust(1)
     return builder.as_markup()
 

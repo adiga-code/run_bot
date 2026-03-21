@@ -119,3 +119,12 @@ async def _save_completion(callback: CallbackQuery, data: dict, session: AsyncSe
         ENCOURAGING_MESSAGES.get(data["status"], "Записал!"),
         reply_markup=kb_main_menu(),
     )
+
+    # Day 28 — program complete
+    if log and log.day_index == 28 and data["status"] in ("done", "partial"):
+        await callback.message.answer(
+            "🏅 <b>Ты прошёл(ла) 28-дневную программу!</b>\n\n"
+            "Это не просто цифра — это 28 дней дисциплины, работы над собой и доверия процессу.\n\n"
+            "Ты справился(ась). Так держать! 💪🔥",
+            parse_mode="HTML",
+        )

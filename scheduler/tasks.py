@@ -5,7 +5,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from keyboards.builders import kb_main_menu, kb_completion
+from keyboards.builders import kb_main_menu, kb_mark_workout
 from services.session_log_service import SessionLogService
 from services.user_service import UserService
 
@@ -88,9 +88,9 @@ async def _send_evening_reminders(bot: Bot, session_maker: async_sessionmaker[As
                     chat_id=log.user_id,
                     text=(
                         "🌙 Вечерняя отметка!\n\n"
-                        "Как прошла тренировка сегодня? Отметь результат:"
+                        "Как прошла тренировка сегодня?"
                     ),
-                    reply_markup=kb_completion(),
+                    reply_markup=kb_mark_workout(),
                 )
                 await log_svc.update(log, evening_sent=True)
             except Exception:

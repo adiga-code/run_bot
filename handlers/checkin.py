@@ -9,7 +9,7 @@ from data.interpretations import get_interpretation
 from engine.red_flags import CheckinData
 from engine.rule_engine import decide_workout_version
 from keyboards.builders import (
-    kb_main_menu, kb_pain_checkin, kb_pain_increases_checkin,
+    kb_main_menu, kb_mark_workout, kb_pain_checkin, kb_pain_increases_checkin,
     kb_sleep, kb_stress, kb_wellbeing, kb_strength_day_options,
 )
 from handlers.utils import safe_answer, filter_strength_text
@@ -63,9 +63,36 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
         return
 
     log_svc = SessionLogService(session)
+    wk_svc = WorkoutService(session)
     log = await log_svc.get_today(callback.from_user.id)
+
     if log and log.checkin_done:
-        await safe_answer(callback, text="Ты уже сделал(а) чек-ин сегодня!", show_alert=True)
+        # Show the already-assigned workout instead of "already done" message
+        await callback.message.edit_reply_markup()
+        await safe_answer(callback)
+        if log.assigned_workout_id:
+            workout = await wk_svc.get_by_id(log.assigned_workout_id)
+            if workout:
+                workout_text = filter_strength_text(
+                    workout.text,
+                    user.strength_format if workout.day_type == "strength" else None,
+                )
+                is_strength = workout.day_type == "strength" and log.assigned_version != "recovery"
+                already_marked = log.completion_status is not None
+                await callback.message.answer(
+                    f"📋 <b>День {log.day_index} из 28 — {workout.title}</b>\n\n{workout_text}",
+                    parse_mode="HTML",
+                    reply_markup=(
+                        kb_main_menu() if already_marked
+                        else kb_strength_day_options() if is_strength
+                        else kb_mark_workout()
+                    ),
+                )
+                return
+        await callback.message.answer(
+            "Чек-ин уже сделан. Вечером отметь как прошла тренировка!",
+            reply_markup=kb_mark_workout() if log.completion_status is None else kb_main_menu(),
+        )
         return
 
     await callback.message.edit_reply_markup()
