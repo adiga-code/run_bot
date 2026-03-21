@@ -1,17 +1,19 @@
 from aiogram import Router
 from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from handlers.onboarding import OnboardingStates
+from keyboards.builders import kb_main_menu
 from services.user_service import UserService
 from services.whitelist_service import WhitelistService
-from keyboards.builders import kb_main_menu
 
 router = Router()
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, session: AsyncSession) -> None:
+async def cmd_start(message: Message, state: FSMContext, session: AsyncSession) -> None:
     user_id = message.from_user.id
 
     wl_svc = WhitelistService(session)
@@ -33,8 +35,7 @@ async def cmd_start(message: Message, session: AsyncSession) -> None:
     )
 
     if created or not user.onboarding_complete:
-        from aiogram.fsm.context import FSMContext
-        # Onboarding start is handled separately via FSM — just trigger it
+        await state.set_state(OnboardingStates.full_name)
         await message.answer(
             "👋 Привет! Я твой беговой помощник на 28 дней.\n\n"
             "Давай познакомимся и подберём программу под тебя.\n"
@@ -42,10 +43,6 @@ async def cmd_start(message: Message, session: AsyncSession) -> None:
             "Напиши своё <b>полное имя</b> (ФИО):",
             parse_mode="HTML",
         )
-        from handlers.onboarding import OnboardingStates
-        # FSMContext is injected by aiogram when handler requests it
-        # We re-route to onboarding via a separate message trigger
-        # The state is set in the onboarding router's entry point
         return
 
     await message.answer(

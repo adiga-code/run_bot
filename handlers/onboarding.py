@@ -1,7 +1,6 @@
 from datetime import date
 
 from aiogram import F, Router
-from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -9,11 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from engine.level_assignment import OnboardingAnswers, assign_level
 from keyboards.builders import (
-    kb_break, kb_frequency, kb_location, kb_pain,
+    kb_break, kb_frequency, kb_location, kb_main_menu, kb_pain,
     kb_pain_increases, kb_regularity, kb_strength, kb_timezone, kb_volume,
 )
 from services.user_service import UserService
-from keyboards.builders import kb_main_menu
 
 router = Router()
 
@@ -33,25 +31,6 @@ class OnboardingStates(StatesGroup):
     q_pain_increases = State()
     q_strength = State()
     q_location = State()
-
-
-# ── Entry point (triggered from start.py) ────────────────────────────────────
-
-@router.message(CommandStart())
-async def onboarding_entry(message: Message, state: FSMContext, session: AsyncSession) -> None:
-    """Only handles /start for users who need onboarding (not yet complete)."""
-    user_svc = UserService(session)
-    user = await user_svc.get(message.from_user.id)
-
-    if user and user.onboarding_complete:
-        return  # handled by start.py
-
-    await state.set_state(OnboardingStates.full_name)
-    await message.answer(
-        "👋 Привет! Я твой беговой помощник на 28 дней.\n\n"
-        "Давай познакомимся. Напиши своё <b>полное имя</b> (ФИО одним сообщением):",
-        parse_mode="HTML",
-    )
 
 
 # ── Step 1: ФИО ───────────────────────────────────────────────────────────────
@@ -242,7 +221,7 @@ async def step_q_location(callback: CallbackQuery, state: FSMContext, session: A
     )
     level = assign_level(answers)
 
-    level_names = {1: "Start", 2: "Return", 3: "Base", 4: "Stability"}
+    level_names = {1: "Start", 2: "Return", 3: "Base", 4: "Stability", 5: "Performance"}
 
     # Save everything to DB
     user_svc = UserService(session)
