@@ -34,7 +34,9 @@
       "Bash(python scripts/gen_level5.py)",
       "Bash(python -m pytest tests/test_engine/test_level_assignment.py -v)",
       "Bash(python -m pytest tests/ -q)",
-      "Bash(\"C:\\\\Users\\\\Hezh PC\\\\Desktop\\\\projects\\\\фриланс_19_03\\\\.env.example\")"
+      "Bash(\"C:\\\\Users\\\\Hezh PC\\\\Desktop\\\\projects\\\\фриланс_19_03\\\\.env.example\")",
+      "Bash(pandoc \"/c/Users/Hezh PC/Downloads/Готовый вариант MVP трен Дамир \\(3\\).docx\" -o /tmp/level5.md)",
+      "Read(//tmp/**)"
     ]
   }
 }

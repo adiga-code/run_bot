@@ -4,6 +4,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from handlers.utils import safe_answer
 from keyboards.builders import kb_completion, kb_effort, kb_had_pain, kb_main_menu
 from services.session_log_service import SessionLogService
 
@@ -26,7 +27,7 @@ class WorkoutStates(StatesGroup):
 async def cb_mark_start(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(WorkoutStates.completion)
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.answer(
         "Как прошла тренировка?",
         reply_markup=kb_completion(),
@@ -38,7 +39,7 @@ async def cb_completion_status(callback: CallbackQuery, state: FSMContext) -> No
     status = callback.data.split(":")[2]
     await state.update_data(status=status)
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
 
     if status == "skipped":
         await state.clear()
@@ -57,7 +58,7 @@ async def cb_effort(callback: CallbackQuery, state: FSMContext) -> None:
     effort = int(callback.data.split(":")[2])
     await state.update_data(effort=effort)
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(WorkoutStates.had_pain)
     await callback.message.answer("Была ли боль во время тренировки?", reply_markup=kb_had_pain())
 
@@ -69,7 +70,7 @@ async def cb_had_pain(callback: CallbackQuery, state: FSMContext, session: Async
     data["had_pain"] = had_pain
     await state.clear()
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
     await _save_completion(callback, data, session)
 
 

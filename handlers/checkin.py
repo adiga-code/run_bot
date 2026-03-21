@@ -12,6 +12,7 @@ from keyboards.builders import (
     kb_main_menu, kb_pain_checkin, kb_pain_increases_checkin,
     kb_sleep, kb_stress, kb_wellbeing,
 )
+from handlers.utils import safe_answer
 from services.session_log_service import SessionLogService
 from services.user_service import UserService
 from services.workout_service import WorkoutService
@@ -51,18 +52,18 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
     user_svc = UserService(session)
     user = await user_svc.get(callback.from_user.id)
     if not user or not user.onboarding_complete:
-        await callback.answer("Сначала пройди онбординг.", show_alert=True)
+        await safe_answer(callback, text="Сначала пройди онбординг.", show_alert=True)
         return
 
     log_svc = SessionLogService(session)
     log = await log_svc.get_today(callback.from_user.id)
     if log and log.checkin_done:
-        await callback.answer("Ты уже сделал(а) чек-ин сегодня!", show_alert=True)
+        await safe_answer(callback, text="Ты уже сделал(а) чек-ин сегодня!", show_alert=True)
         return
 
     await callback.message.edit_reply_markup()
     await _start_checkin(callback, state)
-    await callback.answer()
+    await safe_answer(callback)
 
 
 # ── Wellbeing ─────────────────────────────────────────────────────────────────
@@ -72,7 +73,7 @@ async def ci_wellbeing(callback: CallbackQuery, state: FSMContext) -> None:
     value = int(callback.data.split(":")[2])
     await state.update_data(wellbeing=value)
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(CheckinStates.sleep)
     await callback.message.answer("😴 Как ты спал(а) этой ночью?", reply_markup=kb_sleep())
 
@@ -84,7 +85,7 @@ async def ci_sleep(callback: CallbackQuery, state: FSMContext) -> None:
     value = int(callback.data.split(":")[2])
     await state.update_data(sleep=value)
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(CheckinStates.pain)
     await callback.message.answer(
         "⚡ Есть ли боль или дискомфорт в мышцах / суставах?",
@@ -99,7 +100,7 @@ async def ci_pain(callback: CallbackQuery, state: FSMContext) -> None:
     value = int(callback.data.split(":")[2])
     await state.update_data(pain=value)
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
 
     if value > 1:
         await state.set_state(CheckinStates.pain_increases)
@@ -124,7 +125,7 @@ async def ci_pain_increases(callback: CallbackQuery, state: FSMContext) -> None:
     pain_increases = True if raw == "yes" else (False if raw == "no" else None)
     await state.update_data(pain_increases=pain_increases)
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(CheckinStates.stress)
     await callback.message.answer(
         "🧠 Был ли сильный внешний стресс за последние 24 часа?",
@@ -139,7 +140,7 @@ async def ci_stress(callback: CallbackQuery, state: FSMContext, session: AsyncSe
     value = int(callback.data.split(":")[2])
     await state.update_data(stress=value)
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
     data = await state.get_data()
     await state.clear()
     await _finish_checkin(callback, data, session)

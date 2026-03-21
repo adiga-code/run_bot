@@ -11,6 +11,7 @@ from keyboards.builders import (
     kb_break, kb_frequency, kb_location, kb_main_menu, kb_pain,
     kb_pain_increases, kb_regularity, kb_strength, kb_timezone, kb_volume,
 )
+from handlers.utils import safe_answer
 from services.user_service import UserService
 
 router = Router()
@@ -109,7 +110,7 @@ async def step_timezone(callback: CallbackQuery, state: FSMContext) -> None:
     offset = int(callback.data.split(":")[2])
     await state.update_data(timezone_offset=offset)
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(OnboardingStates.q_frequency)
     await callback.message.answer(
         "Теперь несколько вопросов о твоей беговой подготовке.\n\n"
@@ -126,7 +127,7 @@ async def step_q_frequency(callback: CallbackQuery, state: FSMContext) -> None:
     value = callback.data.split(":")[2]
     await state.update_data(q_frequency=value)
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(OnboardingStates.q_volume)
     await callback.message.answer("<b>Сколько примерно бегаешь в неделю?</b>", parse_mode="HTML", reply_markup=kb_volume())
 
@@ -136,7 +137,7 @@ async def step_q_volume(callback: CallbackQuery, state: FSMContext) -> None:
     value = callback.data.split(":")[2]
     await state.update_data(q_volume=value)
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(OnboardingStates.q_regularity)
     await callback.message.answer("<b>Есть ли система в тренировках?</b>", parse_mode="HTML", reply_markup=kb_regularity())
 
@@ -146,7 +147,7 @@ async def step_q_regularity(callback: CallbackQuery, state: FSMContext) -> None:
     value = callback.data.split(":")[2]
     await state.update_data(q_regularity=value)
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(OnboardingStates.q_break)
     await callback.message.answer("<b>Был ли перерыв в беге?</b>", parse_mode="HTML", reply_markup=kb_break())
 
@@ -156,7 +157,7 @@ async def step_q_break(callback: CallbackQuery, state: FSMContext) -> None:
     value = callback.data.split(":")[2]
     await state.update_data(q_break=value)
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(OnboardingStates.q_pain)
     await callback.message.answer("<b>Есть ли сейчас боли при беге или после?</b>", parse_mode="HTML", reply_markup=kb_pain())
 
@@ -166,7 +167,7 @@ async def step_q_pain(callback: CallbackQuery, state: FSMContext) -> None:
     value = callback.data.split(":")[2]
     await state.update_data(q_pain=value)
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
 
     if value == "none":
         # Skip pain_increases question
@@ -183,7 +184,7 @@ async def step_q_pain_increases(callback: CallbackQuery, state: FSMContext) -> N
     value = callback.data.split(":")[2]
     await state.update_data(q_pain_increases=value)
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(OnboardingStates.q_strength)
     await callback.message.answer("<b>Занимаешься ли силовыми тренировками?</b>", parse_mode="HTML", reply_markup=kb_strength())
 
@@ -193,7 +194,7 @@ async def step_q_strength(callback: CallbackQuery, state: FSMContext) -> None:
     value = callback.data.split(":")[2]
     await state.update_data(q_strength=value)
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
     await state.set_state(OnboardingStates.q_location)
     await callback.message.answer("<b>Где планируешь делать силовые?</b>", parse_mode="HTML", reply_markup=kb_location())
 
@@ -203,7 +204,7 @@ async def step_q_location(callback: CallbackQuery, state: FSMContext, session: A
     location = callback.data.split(":")[2]
     await state.update_data(q_location=location)
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
 
     data = await state.get_data()
     await state.clear()
