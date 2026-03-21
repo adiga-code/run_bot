@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python -m pytest tests/test_engine/ -v)",
+      "Bash(python -m pytest tests/test_services/ -v)",
+      "Bash(python -c \":*)",
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Read(//c/Users/Hezh PC/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/539a9c52-7fe4-4771-918f-71f2bb0d34f7/a086cb6a-712d-44dd-b0fb-75108f738614/skills/docx/**)",
+      "Bash(node -e \":*)",
+      "Bash(node gen_tz.js)",
+      "Bash(npm list:*)",
+      "Bash(npm root:*)",
+      "Bash(npm install:*)",
+      "Bash(python import_workouts.py data/workouts.json --dry-run)",
+      "Bash(set PYTHONIOENCODING=utf-8)",
+      "Bash(python import_workouts.py data/workouts.json)",
+      "Bash(python import_workouts.py data/workouts.json --update)",
+      "Bash(del test_import.db .env)",
+      "WebFetch(domain:docs.google.com)",
+      "WebFetch(domain:doc-10-78-docstext.googleusercontent.com)",
+      "Bash(pandoc --track-changes=all \"C:\\\\Users\\\\Hezh PC\\\\Downloads\\\\Telegram Desktop\\\\MVP.docx\" -o -)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(where python:*)",
+      "Bash(\"C:\\\\Users\\\\Hezh PC\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python312\\\\python.exe\" --version)",
+      "Bash(\"C:\\\\Users\\\\Hezh PC\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python312\\\\python.exe\" \"C:\\\\Users\\\\Hezh PC\\\\Desktop\\\\projects\\\\фриланс_19_03\\\\gen_workouts.py\")",
+      "Bash(\"C:\\\\Users\\\\Hezh PC\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python312\\\\python.exe\" -c \":*)",
+      "Bash(del \"C:\\\\Users\\\\Hezh PC\\\\Desktop\\\\projects\\\\фриланс_19_03\\\\gen_workouts.py\")",
+      "Bash(echo DATABASE_URL=sqlite+aiosqlite:///test_import.db)",
+      "Bash(rm -f .env test_import.db)",
+      "Bash(printf \"BOT_TOKEN=test\\\\nDATABASE_URL=sqlite+aiosqlite:///test_import.db\\\\n\")",
+      "Bash(python -m pytest tests/test_engine/ -v --tb=short)",
+      "Bash(pandoc \"C:\\\\Users\\\\Hezh PC\\\\Downloads\\\\Готовый вариант MVP трен Дамир \\(2\\).docx\" -o output.md --track-changes=all)",
+      "Bash(python scripts/gen_level5.py)",
+      "Bash(python -m pytest tests/test_engine/test_level_assignment.py -v)",
+      "Bash(python -m pytest tests/ -q)"
+    ]
+  }
+}
