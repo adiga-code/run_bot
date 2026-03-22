@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from handlers.utils import safe_answer
-from keyboards.builders import kb_admin_approve, kb_admin_level_picker, kb_admin_menu, kb_main_menu
+from keyboards.builders import kb_admin_application, kb_admin_approve, kb_admin_level_picker, kb_admin_menu, kb_main_menu
 from services.user_service import UserService
 from services.whitelist_service import WhitelistService
 
@@ -166,6 +166,68 @@ async def cb_admin_whitelist(callback: CallbackQuery, session: AsyncSession) -> 
         parse_mode="HTML",
         reply_markup=kb_admin_menu(),
     )
+
+
+# ── Application approve / reject ──────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("adm:app:approve:"))
+async def cb_app_approve(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+
+    user_id = int(callback.data.split(":")[3])
+    wl_svc = WhitelistService(session)
+
+    if await wl_svc.is_allowed(user_id):
+        await safe_answer(callback, text="Уже в whitelist.", show_alert=True)
+        return
+
+    await wl_svc.add(telegram_id=user_id, added_by=callback.from_user.id, note="заявка")
+    await callback.message.edit_reply_markup()
+    await callback.message.edit_text(
+        callback.message.text + "\n\n✅ <b>Одобрено</b>",
+        parse_mode="HTML",
+    )
+    await safe_answer(callback)
+
+    try:
+        await callback.bot.send_message(
+            chat_id=user_id,
+            text=(
+                "🎉 <b>Твоя заявка одобрена!</b>\n\n"
+                "Добро пожаловать в программу! Нажми /start чтобы начать."
+            ),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("adm:app:reject:"))
+async def cb_app_reject(callback: CallbackQuery) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+
+    user_id = int(callback.data.split(":")[3])
+    await callback.message.edit_reply_markup()
+    await callback.message.edit_text(
+        callback.message.text + "\n\n❌ <b>Отклонено</b>",
+        parse_mode="HTML",
+    )
+    await safe_answer(callback)
+
+    try:
+        await callback.bot.send_message(
+            chat_id=user_id,
+            text=(
+                "😔 К сожалению, твоя заявка не была одобрена.\n\n"
+                "Если считаешь это ошибкой — обратись к тренеру напрямую."
+            ),
+        )
+    except Exception:
+        pass
 
 
 # ── Whitelist management ───────────────────────────────────────────────────────

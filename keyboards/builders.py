@@ -173,6 +173,21 @@ def kb_had_pain() -> InlineKeyboardMarkup:
 
 # ── Admin approval ────────────────────────────────────────────────────────────
 
+def kb_apply() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📝 Подать заявку", callback_data="app:start")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_admin_application(user_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Одобрить", callback_data=f"adm:app:approve:{user_id}")
+    builder.button(text="❌ Отклонить", callback_data=f"adm:app:reject:{user_id}")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
 def kb_admin_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="⏳ Ожидающие подтверждения", callback_data="adm:menu:pending")
