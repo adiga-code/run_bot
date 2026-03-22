@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from handlers.utils import safe_answer
-from keyboards.builders import kb_admin_application, kb_admin_approve, kb_admin_level_picker, kb_admin_menu, kb_main_menu
+from keyboards.builders import kb_admin_application, kb_admin_approve, kb_admin_level_picker, kb_admin_menu, kb_admin_start_choice, kb_main_menu
 from services.user_service import UserService
 from services.whitelist_service import WhitelistService
 
@@ -362,6 +362,50 @@ async def cmd_pending(message: Message, session: AsyncSession) -> None:
         )
 
 
+# ── Reset user progress ────────────────────────────────────────────────────────
+
+@router.message(Command("reset_user"))
+async def cmd_reset_user(message: Message, session: AsyncSession) -> None:
+    """/reset_user <user_id> — reset progress, send back to onboarding."""
+    if not is_admin(message.from_user.id):
+        return
+
+    parts = message.text.split()
+    if len(parts) < 2:
+        await message.answer("Использование: /reset_user <telegram_id>")
+        return
+
+    try:
+        target_id = int(parts[1])
+    except ValueError:
+        await message.answer("Telegram ID должен быть числом.")
+        return
+
+    user_svc = UserService(session)
+    user = await user_svc.get(target_id)
+    if not user:
+        await message.answer(f"Пользователь {target_id} не найден.")
+        return
+
+    await user_svc.reset_progress(user)
+    await message.answer(
+        f"✅ Прогресс пользователя <code>{target_id}</code> сброшен.\n"
+        f"Онбординг будет пройден заново при следующем /start.",
+        parse_mode="HTML",
+    )
+
+    try:
+        await message.bot.send_message(
+            chat_id=target_id,
+            text=(
+                "🔄 Тренер сбросил твой прогресс.\n\n"
+                "Напиши /start чтобы пройти анкету заново."
+            ),
+        )
+    except Exception:
+        pass
+
+
 # ── Level change command (admin can adjust active user's level anytime) ────────
 
 @router.message(Command("set_level"))
@@ -405,12 +449,10 @@ async def _activate_user(
     session: AsyncSession,
     user_id: int,
     level: int,
+    start_today: bool,
 ) -> None:
-    """Common: activate user with given level, notify them, update admin message."""
-    if not is_admin(callback.from_user.id):
-        await safe_answer(callback)
-        return
-
+    """Activate user with given level and start date."""
+    from datetime import timedelta
     user_svc = UserService(session)
     user = await user_svc.get(user_id)
 
@@ -422,36 +464,33 @@ async def _activate_user(
         await safe_answer(callback, text="Уже активирован.", show_alert=True)
         return
 
-    await user_svc.update(
-        user,
-        level=level,
-        status="active",
-        program_start_date=date.today(),
-    )
+    start_date = date.today() if start_today else date.today() + timedelta(days=1)
+    await user_svc.update(user, level=level, status="active", program_start_date=start_date)
 
     level_name = LEVEL_NAMES[level]
+    start_label = "сегодня" if start_today else "завтра"
 
-    # Edit admin message to mark done
     await callback.message.edit_text(
-        callback.message.text + f"\n\n✅ <b>Активирован. Уровень: {level_name} ({level})</b>",
+        callback.message.text + f"\n\n✅ <b>Активирован. Уровень: {level_name} ({level}). Старт: {start_label}</b>",
         parse_mode="HTML",
         reply_markup=None,
     )
     await safe_answer(callback)
 
-    # Notify the user
+    user_text = (
+        f"🎉 <b>Тренер подтвердил твой уровень!</b>\n\n"
+        f"Твой уровень: <b>{level_name}</b>\n"
+        f"Программа стартует <b>{start_label}</b>!\n\n"
+        f"Каждое утро я буду спрашивать о самочувствии и показывать тренировку."
+    )
+    if start_today:
+        user_text += "\n\nНачинай прямо сейчас 👇"
     try:
         await callback.bot.send_message(
             chat_id=user_id,
-            text=(
-                f"🎉 <b>Тренер подтвердил твой уровень!</b>\n\n"
-                f"Твой уровень: <b>{level_name}</b>\n"
-                f"Программа стартует <b>сегодня</b>!\n\n"
-                f"Каждое утро я буду спрашивать о самочувствии и показывать тренировку.\n"
-                f"Начинай прямо сейчас — нажми «Сегодняшняя тренировка» 👇"
-            ),
+            text=user_text,
             parse_mode="HTML",
-            reply_markup=kb_main_menu(),
+            reply_markup=kb_main_menu() if start_today else None,
         )
     except Exception:
         pass
@@ -459,13 +498,16 @@ async def _activate_user(
 
 @router.callback_query(F.data.startswith("adm:approve:"))
 async def cb_approve(callback: CallbackQuery, session: AsyncSession) -> None:
-    """adm:approve:<user_id>:<level>"""
+    """adm:approve:today:<user_id>:<level> or adm:approve:tomorrow:<user_id>:<level>"""
     if not is_admin(callback.from_user.id):
         await safe_answer(callback)
         return
 
-    _, _, user_id_str, level_str = callback.data.split(":")
-    await _activate_user(callback, session, int(user_id_str), int(level_str))
+    parts = callback.data.split(":")
+    # parts: ['adm', 'approve', 'today'/'tomorrow', user_id, level]
+    start_today = parts[2] == "today"
+    user_id, level = int(parts[3]), int(parts[4])
+    await _activate_user(callback, session, user_id, level, start_today)
 
 
 @router.callback_query(F.data.startswith("adm:pick:"))
@@ -484,12 +526,17 @@ async def cb_pick_level(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("adm:setlvl:"))
-async def cb_set_level_callback(callback: CallbackQuery, session: AsyncSession) -> None:
-    """adm:setlvl:<user_id>:<level> — set level and activate."""
+async def cb_set_level_callback(callback: CallbackQuery) -> None:
+    """adm:setlvl:<user_id>:<level> — show start date choice."""
     if not is_admin(callback.from_user.id):
         await safe_answer(callback)
         return
 
     _, _, user_id_str, level_str = callback.data.split(":")
-    await callback.message.edit_reply_markup()
-    await _activate_user(callback, session, int(user_id_str), int(level_str))
+    level_name = LEVEL_NAMES[int(level_str)]
+    await safe_answer(callback)
+    await callback.message.answer(
+        f"Уровень: <b>{level_name} ({level_str})</b>. Когда начинаем?",
+        parse_mode="HTML",
+        reply_markup=kb_admin_start_choice(int(user_id_str), int(level_str)),
+    )

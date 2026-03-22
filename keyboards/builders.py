@@ -201,16 +201,21 @@ def kb_admin_menu() -> InlineKeyboardMarkup:
 def kb_admin_approve(user_id: int, level: int) -> InlineKeyboardMarkup:
     """Sent to admin when a new user completes onboarding."""
     level_names = {1: "Start", 2: "Return", 3: "Base", 4: "Stability", 5: "Performance"}
+    name = level_names[level]
     builder = InlineKeyboardBuilder()
-    builder.button(
-        text=f"✅ Подтвердить уровень {level} — {level_names[level]}",
-        callback_data=f"adm:approve:{user_id}:{level}",
-    )
-    builder.button(
-        text="✏️ Изменить уровень",
-        callback_data=f"adm:pick:{user_id}",
-    )
+    builder.button(text=f"▶️ Старт сегодня ({level} — {name})", callback_data=f"adm:approve:today:{user_id}:{level}")
+    builder.button(text=f"📅 Старт завтра ({level} — {name})", callback_data=f"adm:approve:tomorrow:{user_id}:{level}")
+    builder.button(text="✏️ Изменить уровень", callback_data=f"adm:pick:{user_id}")
     builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_admin_start_choice(user_id: int, level: int) -> InlineKeyboardMarkup:
+    """After admin picks a custom level — choose start date."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="▶️ Старт сегодня", callback_data=f"adm:approve:today:{user_id}:{level}")
+    builder.button(text="📅 Старт завтра", callback_data=f"adm:approve:tomorrow:{user_id}:{level}")
+    builder.adjust(2)
     return builder.as_markup()
 
 

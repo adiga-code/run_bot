@@ -67,6 +67,19 @@ class UserService:
         end = min(start + 6, 28)
         return start, end
 
+    async def reset_progress(self, user: User) -> User:
+        """Reset user to pre-onboarding state so they can start over."""
+        return await self.update(
+            user,
+            onboarding_complete=False,
+            status="pending",
+            program_start_date=None,
+            level=None,
+            current_day=1,
+            streak=0,
+            week_repeat_count=0,
+        )
+
     async def all_active(self) -> list[User]:
         """Returns users whose program is running (status=active)."""
         result = await self.session.execute(
