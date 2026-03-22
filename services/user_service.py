@@ -75,8 +75,6 @@ class UserService:
             status="pending",
             program_start_date=None,
             level=None,
-            current_day=1,
-            streak=0,
             week_repeat_count=0,
         )
 

@@ -192,8 +192,48 @@ def kb_admin_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="⏳ Ожидающие подтверждения", callback_data="adm:menu:pending")
     builder.button(text="👥 Все пользователи", callback_data="adm:menu:users")
+    builder.button(text="📋 Отчёты", callback_data="adm:menu:reports")
     builder.button(text="📊 Статистика", callback_data="adm:menu:stats")
     builder.button(text="🔒 Whitelist", callback_data="adm:menu:whitelist")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_admin_report_users(users: list) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for u in users:
+        builder.button(text=u.full_name, callback_data=f"adm:report:view:{u.telegram_id}")
+    builder.button(text="◀️ Назад", callback_data="adm:menu:back")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_admin_report_actions(user_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📥 Скачать CSV", callback_data=f"adm:report:csv:{user_id}")
+    builder.button(text="⚙️ Управление", callback_data=f"adm:manage:{user_id}")
+    builder.button(text="◀️ К списку", callback_data="adm:menu:reports")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_admin_manage(user_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Изменить режим дня", callback_data=f"adm:mode:{user_id}")
+    builder.button(text="⏭️ Перейти к дню", callback_data=f"adm:jump:{user_id}")
+    builder.button(text="🎯 Изменить уровень", callback_data=f"adm:pick:{user_id}")
+    builder.button(text="✉️ Отправить сообщение", callback_data=f"adm:msg:{user_id}")
+    builder.button(text="◀️ Назад", callback_data=f"adm:report:view:{user_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_admin_day_mode(user_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💪 Base (полная)", callback_data=f"adm:mode:set:{user_id}:base")
+    builder.button(text="🔆 Light (лёгкая)", callback_data=f"adm:mode:set:{user_id}:light")
+    builder.button(text="🔄 Recovery (восстановление)", callback_data=f"adm:mode:set:{user_id}:recovery")
+    builder.button(text="◀️ Назад", callback_data=f"adm:manage:{user_id}")
     builder.adjust(1)
     return builder.as_markup()
 

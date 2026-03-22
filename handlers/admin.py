@@ -7,7 +7,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from handlers.utils import safe_answer
-from keyboards.builders import kb_admin_application, kb_admin_approve, kb_admin_level_picker, kb_admin_menu, kb_admin_start_choice, kb_main_menu
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+
+from keyboards.builders import (
+    kb_admin_application, kb_admin_approve, kb_admin_day_mode, kb_admin_level_picker,
+    kb_admin_manage, kb_admin_menu, kb_admin_report_actions, kb_admin_report_users,
+    kb_admin_start_choice, kb_main_menu,
+)
+
+
+class AdminActionStates(StatesGroup):
+    jump_day = State()   # FSM data: target_user_id
+    send_msg = State()   # FSM data: target_user_id
 from services.user_service import UserService
 from services.whitelist_service import WhitelistService
 
@@ -140,6 +152,307 @@ async def cb_admin_users(callback: CallbackQuery, session: AsyncSession) -> None
             parse_mode="HTML",
             reply_markup=kb_admin_menu() if i == len(chunks) - 1 else None,
         )
+
+
+@router.callback_query(F.data.in_({"adm:menu:reports", "adm:menu:back"}))
+async def cb_admin_reports(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    from sqlalchemy import select
+    from database.models import User
+
+    result = await session.execute(
+        select(User)
+        .where(User.onboarding_complete == True, User.status == "active")
+        .order_by(User.full_name)
+    )
+    users = list(result.scalars().all())
+
+    if not users:
+        await callback.message.answer("Нет активных пользователей.", reply_markup=kb_admin_menu())
+        return
+
+    await callback.message.answer(
+        f"📋 <b>Отчёты</b>\n\nВыбери пользователя ({len(users)}):",
+        parse_mode="HTML",
+        reply_markup=kb_admin_report_users(users),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:report:view:"))
+async def cb_report_view(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    user_id = int(callback.data.split(":")[3])
+    await _send_report(callback.message, session, user_id, as_file=False)
+
+
+@router.callback_query(F.data.startswith("adm:report:csv:"))
+async def cb_report_csv(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    user_id = int(callback.data.split(":")[3])
+    await _send_report(callback.message, session, user_id, as_file=True)
+
+
+async def _send_report(message, session: AsyncSession, user_id: int, as_file: bool) -> None:
+    import io
+    from sqlalchemy import select
+    from database.models import User, SessionLog, Workout
+
+    user_svc = UserService(session)
+    user = await user_svc.get(user_id)
+    if not user:
+        await message.answer("Пользователь не найден.")
+        return
+
+    result = await session.execute(
+        select(SessionLog, Workout)
+        .outerjoin(Workout, SessionLog.assigned_workout_id == Workout.id)
+        .where(SessionLog.user_id == user_id)
+        .order_by(SessionLog.day_index)
+    )
+    rows = result.all()
+
+    WELLBEING = {1: "Плохо", 2: "Тяжеловато", 3: "Нормально", 4: "Отлично"}
+    SLEEP = {1: "Плохо", 2: "Нормально", 3: "Хорошо"}
+    PAIN = {1: "Нет", 2: "Немного", 3: "Есть"}
+    STATUS = {"done": "✅ Выполнено", "partial": "⚡ Частично", "skipped": "❌ Пропущено"}
+    VERSION = {"base": "Base", "light": "Light", "recovery": "Recovery"}
+    DAY_TYPE = {"run": "Бег", "strength": "Силовая", "recovery": "Восстановление", "rest": "Отдых"}
+
+    level_name = LEVEL_NAMES.get(user.level, "?")
+    current_day = user_svc.current_program_day(user) or "?"
+
+    if as_file:
+        buf = io.StringIO()
+        buf.write("День,Дата,Тип,Режим,Самочувствие,Сон,Боль,Статус\n")
+        for log, workout in rows:
+            buf.write(",".join([
+                str(log.day_index),
+                str(log.date),
+                DAY_TYPE.get(workout.day_type, "—") if workout else "—",
+                VERSION.get(log.assigned_version, "—") if log.assigned_version else "—",
+                WELLBEING.get(log.wellbeing, "—") if log.wellbeing else "—",
+                SLEEP.get(log.sleep_quality, "—") if log.sleep_quality else "—",
+                PAIN.get(log.pain_level, "—") if log.pain_level else "—",
+                log.completion_status or "—",
+            ]) + "\n")
+
+        from aiogram.types import BufferedInputFile
+        file = BufferedInputFile(
+            buf.getvalue().encode("utf-8-sig"),
+            filename=f"report_{user.full_name.replace(' ', '_')}.csv",
+        )
+        await message.answer_document(
+            file,
+            caption=f"📥 Отчёт: {user.full_name}",
+        )
+        return
+
+    # Text view
+    if not rows:
+        await message.answer(
+            f"По пользователю <b>{user.full_name}</b> данных нет.",
+            parse_mode="HTML",
+            reply_markup=kb_admin_menu(),
+        )
+        return
+
+    lines = [f"📋 <b>{user.full_name}</b> | {level_name} | День {current_day}/28\n"]
+    for log, workout in rows:
+        day_type = DAY_TYPE.get(workout.day_type, "—") if workout else "—"
+        version = VERSION.get(log.assigned_version, "—") if log.assigned_version else "—"
+        status = STATUS.get(log.completion_status, "—") if log.completion_status else "—"
+        lines.append(f"День {log.day_index:>2} | {day_type:<14} | {version:<8} | {status}")
+
+    text = "\n".join(lines)
+    # Split if too long
+    chunks = [text[i:i+3800] for i in range(0, len(text), 3800)]
+    for i, chunk in enumerate(chunks):
+        await message.answer(
+            f"<pre>{chunk}</pre>" if i > 0 else chunk,
+            parse_mode="HTML",
+            reply_markup=kb_admin_report_actions(user_id) if i == len(chunks) - 1 else None,
+        )
+
+
+# ── User management ────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("adm:manage:"))
+async def cb_admin_manage(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    user_id = int(callback.data.split(":")[2])
+    user_svc = UserService(session)
+    user = await user_svc.get(user_id)
+    if not user:
+        await callback.message.answer("Пользователь не найден.")
+        return
+
+    current_day = user_svc.current_program_day(user) or "?"
+    level_name = LEVEL_NAMES.get(user.level, "?")
+    await callback.message.answer(
+        f"⚙️ <b>{user.full_name}</b>\n"
+        f"Уровень: {level_name} | День: {current_day}/28",
+        parse_mode="HTML",
+        reply_markup=kb_admin_manage(user_id),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:mode:") & ~F.data.startswith("adm:mode:set:"))
+async def cb_admin_mode_picker(callback: CallbackQuery) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    user_id = int(callback.data.split(":")[2])
+    await callback.message.answer(
+        "Выбери режим на сегодня:",
+        reply_markup=kb_admin_day_mode(user_id),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:mode:set:"))
+async def cb_admin_mode_set(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+
+    parts = callback.data.split(":")
+    # adm:mode:set:<user_id>:<version>
+    user_id, version = int(parts[3]), parts[4]
+    await safe_answer(callback)
+
+    from datetime import date as date_cls
+    from sqlalchemy import select
+    from database.models import SessionLog
+
+    result = await session.execute(
+        select(SessionLog).where(
+            SessionLog.user_id == user_id,
+            SessionLog.date == date_cls.today(),
+        )
+    )
+    log = result.scalar_one_or_none()
+    if not log:
+        await callback.message.answer("Лог на сегодня не найден. Пользователь ещё не начал день.")
+        return
+
+    log.assigned_version = version
+    await session.commit()
+
+    version_names = {"base": "Base (полная)", "light": "Light (лёгкая)", "recovery": "Recovery (восстановление)"}
+    await callback.message.answer(f"✅ Режим изменён на <b>{version_names[version]}</b>.", parse_mode="HTML")
+
+    try:
+        await callback.bot.send_message(
+            chat_id=user_id,
+            text=f"🔄 Тренер скорректировал твою тренировку на сегодня.\n\n"
+                 f"Новый режим: <b>{version_names[version]}</b>\n\n"
+                 f"Нажми «Сегодняшняя тренировка» чтобы увидеть обновлённый план.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("adm:jump:"))
+async def cb_admin_jump(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    user_id = int(callback.data.split(":")[2])
+    await state.set_state(AdminActionStates.jump_day)
+    await state.update_data(target_user_id=user_id)
+    await callback.message.answer("Введи номер дня (1–28) куда перенести пользователя:")
+
+
+@router.message(AdminActionStates.jump_day)
+async def admin_jump_day_input(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    data = await state.get_data()
+    target_user_id = data["target_user_id"]
+
+    try:
+        target_day = int(message.text.strip())
+        assert 1 <= target_day <= 28
+    except Exception:
+        await message.answer("Введи число от 1 до 28.")
+        return
+
+    await state.clear()
+
+    from datetime import timedelta
+    user_svc = UserService(session)
+    user = await user_svc.get(target_user_id)
+    if not user:
+        await message.answer("Пользователь не найден.")
+        return
+
+    new_start = date.today() - timedelta(days=target_day - 1)
+    await user_svc.update(user, program_start_date=new_start, week_repeat_count=0)
+
+    await message.answer(f"✅ Пользователь переведён на <b>день {target_day}</b>.", parse_mode="HTML")
+
+    try:
+        await message.bot.send_message(
+            chat_id=target_user_id,
+            text=f"📅 Тренер скорректировал твой прогресс.\n\nСегодня у тебя <b>день {target_day}</b>.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("adm:msg:"))
+async def cb_admin_send_msg(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    user_id = int(callback.data.split(":")[2])
+    await state.set_state(AdminActionStates.send_msg)
+    await state.update_data(target_user_id=user_id)
+    await callback.message.answer("Напиши сообщение для пользователя:")
+
+
+@router.message(AdminActionStates.send_msg)
+async def admin_send_msg_input(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    data = await state.get_data()
+    target_user_id = data["target_user_id"]
+    await state.clear()
+
+    try:
+        await message.bot.send_message(
+            chat_id=target_user_id,
+            text=f"💬 <b>Сообщение от тренера:</b>\n\n{message.text}",
+            parse_mode="HTML",
+        )
+        await message.answer("✅ Сообщение отправлено.")
+    except Exception as e:
+        await message.answer(f"❌ Не удалось отправить: {e}")
 
 
 @router.callback_query(F.data == "adm:menu:whitelist")
