@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from engine.red_flags import CheckinData, detect_red_flag
-from engine.fatigue import RecentLogData, detect_cumulative_fatigue
+from engine.fatigue import RecentLogData, detect_cumulative_fatigue, detect_severe_fatigue
 
 
 @dataclass
@@ -10,39 +10,6 @@ class WorkoutDecision:
     reason: str            # human-readable reason (for logs/telemetry)
     red_flag: bool
     fatigue_reduction: bool
-    score: int = 0         # stress-score that led to this decision
-
-
-def _calc_score(checkin: CheckinData) -> int:
-    """
-    Stress-score based on the client's formula:
-      wellbeing тяжеловато(2) → +1
-      wellbeing плохо(1)      → +2
-      sleep плохо(1)          → +1
-      pain немного(2)         → +2
-      stress умеренный(2)     → +1
-      stress сильный(3)       → +2
-
-    pain==3 and pain_increases are handled as red flags before score calc.
-    """
-    score = 0
-    if checkin.wellbeing == 1:
-        score += 2
-    elif checkin.wellbeing == 2:
-        score += 1
-
-    if checkin.sleep_quality == 1:
-        score += 1
-
-    if checkin.pain_level == 2:
-        score += 2
-
-    if checkin.stress_level == 2:
-        score += 1
-    elif checkin.stress_level == 3:
-        score += 2
-
-    return score
 
 
 def decide_workout_version(
@@ -52,14 +19,15 @@ def decide_workout_version(
     prev_day_type: str | None = None,
 ) -> WorkoutDecision:
     """
-    Selects workout version using score-based logic from the client spec.
+    Selects workout version using direct mapping from client spec.
 
     Priority chain:
       1. Rest day → always rest
-      2. Red flag (pain==3, escalating pain, или bad+high stress) → recovery
-      3. Score calculation → base/light/recovery
-      4. Cumulative fatigue (2+ tough days) → force score ≥ 2 (at least light)
-      5. After-strength constraint: prev_day_type==strength + run → cap at light
+      2. Red flag → recovery
+      3. Severe fatigue (3 tough days) → recovery
+      4. Direct mapping: wellbeing/sleep/pain → base/light/recovery
+      5. Cumulative fatigue (2 tough days) → base → light
+      6. After-strength constraint → base → light
     """
     if day_type == "rest":
         return WorkoutDecision(
@@ -67,54 +35,52 @@ def decide_workout_version(
             reason="день отдыха по плану",
             red_flag=False,
             fatigue_reduction=False,
-            score=0,
         )
 
     if detect_red_flag(checkin):
         return WorkoutDecision(
             version="recovery",
-            reason="красный флаг: боль, нарастающая боль или сильный стресс + плохое состояние",
+            reason="красный флаг: активная боль или нарастающая боль",
             red_flag=True,
             fatigue_reduction=False,
-            score=99,
         )
 
-    score = _calc_score(checkin)
+    severe = detect_severe_fatigue(recent_logs)
+    if severe:
+        return WorkoutDecision(
+            version="recovery",
+            reason="3 тяжёлых дня подряд — принудительное восстановление",
+            red_flag=False,
+            fatigue_reduction=True,
+        )
 
-    # Cumulative fatigue: ensure at least light
-    fatigue = detect_cumulative_fatigue(recent_logs)
-    if fatigue and score < 2:
-        score = 2
-
-    # After-strength constraint: no heavy run after strength day
-    after_strength = (prev_day_type == "strength" and day_type == "run")
-    if after_strength and score < 2:
-        score = 2
-
-    # Map score to version
-    if score <= 1:
-        version = "base"
-    elif score <= 3:
-        version = "light"
-    else:
+    # Direct mapping (spec priority: recovery > light > base)
+    # Recovery: wellbeing плохо(1) OR pain есть(3)
+    if checkin.wellbeing == 1 or checkin.pain_level == 3:
         version = "recovery"
-
-    reason_parts = []
-    if fatigue:
-        reason_parts.append("накопленная усталость")
-    if after_strength:
-        reason_parts.append("день после силовой")
-    if score == 0:
-        reason_parts.append("хорошее самочувствие")
-    elif score == 1:
-        reason_parts.append(f"лёгкий дискомфорт (балл {score})")
+        reason = "плохое самочувствие или боль"
+    # Light: wellbeing тяжеловато(2) OR sleep плохо(1) OR pain немного(2)
+    elif checkin.wellbeing == 2 or checkin.sleep_quality == 1 or checkin.pain_level == 2:
+        version = "light"
+        reason = "умеренный дискомфорт"
     else:
-        reason_parts.append(f"стресс-балл {score}")
+        version = "base"
+        reason = "хорошее самочувствие"
+
+    fatigue = detect_cumulative_fatigue(recent_logs)
+    after_strength = (prev_day_type == "strength" and day_type == "run")
+
+    if version == "base":
+        if fatigue:
+            version = "light"
+            reason = "накопленная усталость (2+ тяжёлых дня)"
+        elif after_strength:
+            version = "light"
+            reason = "день после силовой"
 
     return WorkoutDecision(
         version=version,
-        reason=", ".join(reason_parts),
+        reason=reason,
         red_flag=False,
-        fatigue_reduction=fatigue,
-        score=score,
+        fatigue_reduction=fatigue or severe,
     )

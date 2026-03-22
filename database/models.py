@@ -35,13 +35,15 @@ class User(Base):
     reminders_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Onboarding answers (raw values, stored for reference)
+    q_runs: Mapped[str | None] = mapped_column(String(10), nullable=True)        # yes / no
     q_frequency: Mapped[str | None] = mapped_column(String(20), nullable=True)
     q_volume: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    q_regularity: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    q_structure: Mapped[str | None] = mapped_column(String(10), nullable=True)   # yes / no
+    q_regularity: Mapped[str | None] = mapped_column(String(20), nullable=True)  # kept for legacy
     q_break: Mapped[str | None] = mapped_column(String(20), nullable=True)
     q_pain: Mapped[str | None] = mapped_column(String(20), nullable=True)
     q_pain_increases: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    q_strength: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    q_strength: Mapped[str | None] = mapped_column(String(20), nullable=True)    # kept for legacy
 
     # Access & lifecycle
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

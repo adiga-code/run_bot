@@ -22,7 +22,9 @@ async def _migrate_db() -> None:
     """ADD COLUMN IF NOT EXISTS migrations — safe to run on every restart."""
     migrations: list[tuple[str, str, str]] = [
         # (table, column, definition)
-        ("users", "status", "VARCHAR(20) DEFAULT 'active'"),
+        ("users", "status",      "VARCHAR(20) DEFAULT 'active'"),
+        ("users", "q_runs",      "VARCHAR(10)"),
+        ("users", "q_structure", "VARCHAR(10)"),
     ]
     async with engine.begin() as conn:
         for table, column, definition in migrations:

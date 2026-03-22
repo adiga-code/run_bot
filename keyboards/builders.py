@@ -6,11 +6,18 @@ from data.timezones import TIMEZONES
 
 # ── Onboarding ────────────────────────────────────────────────────────────────
 
+def kb_runs() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Да, бегаю", callback_data="onb:runs:yes")
+    builder.button(text="❌ Нет, не бегаю", callback_data="onb:runs:no")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def kb_frequency() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="Не бегаю совсем", callback_data="onb:frequency:not_at_all")
-    builder.button(text="1 раз в неделю", callback_data="onb:frequency:once")
-    builder.button(text="2-3 раза в неделю", callback_data="onb:frequency:2_3x")
+    builder.button(text="0–1 раз в неделю", callback_data="onb:frequency:0_1")
+    builder.button(text="2–3 раза в неделю", callback_data="onb:frequency:2_3")
     builder.button(text="4+ раза в неделю", callback_data="onb:frequency:4plus")
     builder.adjust(1)
     return builder.as_markup()
@@ -18,28 +25,26 @@ def kb_frequency() -> InlineKeyboardMarkup:
 
 def kb_volume() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="Не бегаю", callback_data="onb:volume:none")
-    builder.button(text="До 60 мин/нед", callback_data="onb:volume:up_to_60")
-    builder.button(text="60-120 мин/нед", callback_data="onb:volume:60_to_120")
-    builder.button(text="120+ мин/нед", callback_data="onb:volume:120plus")
+    builder.button(text="Не бегаю / до 10 км/нед", callback_data="onb:volume:to_10")
+    builder.button(text="10–25 км/нед", callback_data="onb:volume:10_25")
+    builder.button(text="25–50 км/нед", callback_data="onb:volume:25_50")
+    builder.button(text="50+ км/нед", callback_data="onb:volume:50plus")
     builder.adjust(1)
     return builder.as_markup()
 
 
-def kb_regularity() -> InlineKeyboardMarkup:
+def kb_structure() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="Без системы", callback_data="onb:regularity:no_system")
-    builder.button(text="Иногда", callback_data="onb:regularity:sometimes")
-    builder.button(text="Регулярно", callback_data="onb:regularity:regularly")
+    builder.button(text="✅ Да, есть план / система", callback_data="onb:structure:yes")
+    builder.button(text="❌ Нет, бегаю как получается", callback_data="onb:structure:no")
     builder.adjust(1)
     return builder.as_markup()
 
 
 def kb_break() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="Давно не бегал(а)", callback_data="onb:break:long_break")
-    builder.button(text="Был перерыв", callback_data="onb:break:had_break")
-    builder.button(text="Без перерывов", callback_data="onb:break:no_break")
+    builder.button(text="✅ Нет, бегаю без перерывов", callback_data="onb:break:no")
+    builder.button(text="⚠️ Да, был перерыв", callback_data="onb:break:yes")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -171,8 +176,9 @@ def kb_had_pain() -> InlineKeyboardMarkup:
 def kb_admin_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="⏳ Ожидающие подтверждения", callback_data="adm:menu:pending")
+    builder.button(text="👥 Все пользователи", callback_data="adm:menu:users")
     builder.button(text="📊 Статистика", callback_data="adm:menu:stats")
-    builder.button(text="👥 Whitelist", callback_data="adm:menu:whitelist")
+    builder.button(text="🔒 Whitelist", callback_data="adm:menu:whitelist")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -232,6 +238,16 @@ def kb_main_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="📋 Сегодняшняя тренировка", callback_data="menu:today")
     builder.button(text="📊 Мой прогресс", callback_data="menu:progress")
+    builder.button(text="🔔 Напоминания", callback_data="menu:reminders")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_progress_menu() -> InlineKeyboardMarkup:
+    """Progress view with reset day option."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Начать день заново", callback_data="menu:reset_day")
+    builder.button(text="📋 Сегодняшняя тренировка", callback_data="menu:today")
     builder.button(text="🔔 Напоминания", callback_data="menu:reminders")
     builder.adjust(1)
     return builder.as_markup()

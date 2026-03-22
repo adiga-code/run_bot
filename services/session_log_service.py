@@ -52,7 +52,6 @@ class SessionLogService:
                 sleep_quality=log.sleep_quality or 2,
                 completion_status=log.completion_status,
                 wellbeing=log.wellbeing or 3,
-                stress_level=log.stress_level or 1,
             )
             for log in reversed(logs)  # oldest first
         ]

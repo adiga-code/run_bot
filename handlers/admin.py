@@ -95,6 +95,53 @@ async def cb_admin_stats(callback: CallbackQuery, session: AsyncSession) -> None
     )
 
 
+@router.callback_query(F.data == "adm:menu:users")
+async def cb_admin_users(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    from sqlalchemy import select
+    from database.models import User
+
+    result = await session.execute(
+        select(User).where(User.onboarding_complete == True).order_by(User.created_at.desc())
+    )
+    users = list(result.scalars().all())
+
+    if not users:
+        await callback.message.answer("Нет зарегистрированных пользователей.", reply_markup=kb_admin_menu())
+        return
+
+    lines = [f"<b>Все пользователи ({len(users)}):</b>\n"]
+    for u in users:
+        level_name = LEVEL_NAMES.get(u.level, "?") if u.level else "—"
+        status_icon = "✅" if u.status == "active" else "⏳"
+        started = u.program_start_date.strftime("%d.%m") if u.program_start_date else "не начата"
+        lines.append(
+            f"{status_icon} <b>{u.full_name}</b>\n"
+            f"   ID: <code>{u.telegram_id}</code> | {level_name} | Старт: {started}"
+        )
+
+    # Split into chunks to avoid Telegram message length limit
+    chunk, chunks = [], []
+    for line in lines:
+        chunk.append(line)
+        if len("\n".join(chunk)) > 3000:
+            chunks.append("\n".join(chunk[:-1]))
+            chunk = [line]
+    if chunk:
+        chunks.append("\n".join(chunk))
+
+    for i, text in enumerate(chunks):
+        await callback.message.answer(
+            text,
+            parse_mode="HTML",
+            reply_markup=kb_admin_menu() if i == len(chunks) - 1 else None,
+        )
+
+
 @router.callback_query(F.data == "adm:menu:whitelist")
 async def cb_admin_whitelist(callback: CallbackQuery, session: AsyncSession) -> None:
     if not is_admin(callback.from_user.id):

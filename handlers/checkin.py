@@ -10,7 +10,7 @@ from engine.red_flags import CheckinData
 from engine.rule_engine import decide_workout_version
 from keyboards.builders import (
     kb_main_menu, kb_mark_workout, kb_pain_checkin, kb_pain_increases_checkin,
-    kb_sleep, kb_stress, kb_wellbeing, kb_strength_day_options,
+    kb_sleep, kb_wellbeing, kb_strength_day_options,
 )
 from handlers.utils import safe_answer, filter_strength_text
 from services.session_log_service import SessionLogService
@@ -25,7 +25,6 @@ class CheckinStates(StatesGroup):
     sleep = State()
     pain = State()
     pain_increases = State()
-    stress = State()
 
 
 async def _start_checkin(target, state: FSMContext) -> None:
@@ -43,6 +42,9 @@ async def cmd_checkin(message: Message, state: FSMContext, session: AsyncSession
     user = await user_svc.get(message.from_user.id)
     if not user or not user.onboarding_complete:
         await message.answer("Сначала нужно пройти онбординг. Напиши /start")
+        return
+    if user.status != "active":
+        await message.answer("⏳ Ожидаем подтверждения тренера.")
         return
     await _start_checkin(message, state)
 
@@ -67,7 +69,6 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
     log = await log_svc.get_today(callback.from_user.id)
 
     if log and log.checkin_done:
-        # Show the already-assigned workout instead of "already done" message
         await callback.message.edit_reply_markup()
         await safe_answer(callback)
         if log.assigned_workout_id:
@@ -130,7 +131,7 @@ async def ci_sleep(callback: CallbackQuery, state: FSMContext) -> None:
 # ── Pain ──────────────────────────────────────────────────────────────────────
 
 @router.callback_query(CheckinStates.pain, F.data.startswith("ci:pain:"))
-async def ci_pain(callback: CallbackQuery, state: FSMContext) -> None:
+async def ci_pain(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     value = int(callback.data.split(":")[2])
     await state.update_data(pain=value)
     await callback.message.edit_reply_markup()
@@ -144,35 +145,18 @@ async def ci_pain(callback: CallbackQuery, state: FSMContext) -> None:
         )
     else:
         await state.update_data(pain_increases=None)
-        await state.set_state(CheckinStates.stress)
-        await callback.message.answer(
-            "🧠 Был ли сильный внешний стресс за последние 24 часа?",
-            reply_markup=kb_stress(),
-        )
+        data = await state.get_data()
+        await state.clear()
+        await _finish_checkin(callback, data, session)
 
 
 # ── Pain increases ────────────────────────────────────────────────────────────
 
 @router.callback_query(CheckinStates.pain_increases, F.data.startswith("ci:pain_inc:"))
-async def ci_pain_increases(callback: CallbackQuery, state: FSMContext) -> None:
+async def ci_pain_increases(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     raw = callback.data.split(":")[2]
     pain_increases = True if raw == "yes" else (False if raw == "no" else None)
     await state.update_data(pain_increases=pain_increases)
-    await callback.message.edit_reply_markup()
-    await safe_answer(callback)
-    await state.set_state(CheckinStates.stress)
-    await callback.message.answer(
-        "🧠 Был ли сильный внешний стресс за последние 24 часа?",
-        reply_markup=kb_stress(),
-    )
-
-
-# ── Stress ────────────────────────────────────────────────────────────────────
-
-@router.callback_query(CheckinStates.stress, F.data.startswith("ci:stress:"))
-async def ci_stress(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
-    value = int(callback.data.split(":")[2])
-    await state.update_data(stress=value)
     await callback.message.edit_reply_markup()
     await safe_answer(callback)
     data = await state.get_data()
@@ -194,7 +178,6 @@ async def _finish_checkin(
         sleep_quality=data["sleep"],
         pain_level=data["pain"],
         pain_increases=data.get("pain_increases"),
-        stress_level=data.get("stress", 1),
     )
 
     user_svc = UserService(session)
@@ -206,7 +189,6 @@ async def _finish_checkin(
     recent_logs = await log_svc.get_recent(user_id)
     day_type = await wk_svc.get_day_type(user.level, day_index) or "run"
 
-    # Get yesterday's day type for after-strength constraint
     prev_day_type = await wk_svc.get_day_type(user.level, max(1, day_index - 1))
 
     decision = decide_workout_version(checkin, recent_logs, day_type, prev_day_type)
@@ -222,7 +204,6 @@ async def _finish_checkin(
         sleep_quality=checkin.sleep_quality,
         pain_level=checkin.pain_level,
         pain_increases=checkin.pain_increases,
-        stress_level=checkin.stress_level,
         assigned_workout_id=workout.id if workout else None,
         assigned_version=decision.version,
         red_flag=decision.red_flag,
@@ -246,7 +227,7 @@ async def _finish_checkin(
             f"📋 <b>День {day_index} из 28 — {workout.title}</b>\n\n"
             f"{workout_text}{micro}",
             parse_mode="HTML",
-            reply_markup=kb_strength_day_options() if is_strength else kb_main_menu(),
+            reply_markup=kb_strength_day_options() if is_strength else kb_mark_workout(),
         )
     else:
         await callback.message.answer(
