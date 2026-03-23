@@ -69,8 +69,8 @@ async def _send_progress(target, user_id: int, session: AsyncSession) -> None:
             break
         day_type = await wk_svc.get_day_type(user.level, future_day) or "run"
         label = DAY_TYPE_LABELS.get(day_type, day_type)
-        marker = "👉 " if i == 0 else f"Д{future_day}: "
-        ahead_lines.append(f"{marker}<b>День {future_day}</b> — {label}")
+        marker = "👉" if i == 0 else "•"
+        ahead_lines.append(f"{marker} День {future_day} — {label}")
 
     week_ahead = "\n".join(ahead_lines) if ahead_lines else ""
 
