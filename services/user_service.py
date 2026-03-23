@@ -69,12 +69,16 @@ class UserService:
 
     async def reset_progress(self, user: User) -> User:
         """Reset user to pre-onboarding state so they can start over."""
+        from services.session_log_service import SessionLogService
+        log_svc = SessionLogService(self.session)
+        await log_svc.delete_today(user.telegram_id)
         return await self.update(
             user,
             onboarding_complete=False,
             status="pending",
             program_start_date=None,
             level=None,
+            streak=0,
             week_repeat_count=0,
         )
 

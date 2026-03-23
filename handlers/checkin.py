@@ -1,3 +1,6 @@
+import json
+import os
+
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -9,13 +12,29 @@ from data.interpretations import get_interpretation
 from engine.red_flags import CheckinData
 from engine.rule_engine import decide_workout_version
 from keyboards.builders import (
-    kb_main_menu, kb_mark_workout, kb_pain_checkin, kb_pain_increases_checkin,
-    kb_sleep, kb_wellbeing, kb_strength_day_options,
+    kb_main_menu, kb_completion, kb_completion_strength, kb_pain_checkin,
+    kb_pain_increases_checkin, kb_sleep, kb_wellbeing,
 )
 from handlers.utils import safe_answer, filter_strength_text
 from services.session_log_service import SessionLogService
 from services.user_service import UserService
 from services.workout_service import WorkoutService
+
+_TIPS_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "day_tips.json")
+with open(_TIPS_PATH, encoding="utf-8") as _f:
+    _DAY_TIPS: dict = json.load(_f)
+
+
+def _get_tip_lines(level: int, day: int) -> str:
+    tip = _DAY_TIPS.get(str(level), {}).get(str(day), {})
+    motivation = tip.get("motivation", "")
+    hint = tip.get("tip", "")
+    parts = []
+    if motivation:
+        parts.append(f"💬 <i>{motivation}</i>")
+    if hint:
+        parts.append(f"🤍 <i>{hint}</i>")
+    return "\n".join(parts)
 
 router = Router()
 
@@ -80,13 +99,15 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
                 )
                 is_strength = workout.day_type == "strength" and log.assigned_version != "recovery"
                 already_marked = log.completion_status is not None
+                tips = _get_tip_lines(user.level, log.day_index)
+                tips_block = f"\n\n{tips}" if tips else ""
                 await callback.message.answer(
-                    f"📋 <b>День {log.day_index} из 28 — {workout.title}</b>\n\n{workout_text}",
+                    f"📋 <b>День {log.day_index} из 28 — {workout.title}</b>{tips_block}\n\n{workout_text}",
                     parse_mode="HTML",
                     reply_markup=(
                         kb_main_menu() if already_marked
-                        else kb_strength_day_options() if is_strength
-                        else kb_mark_workout()
+                        else kb_completion_strength() if is_strength
+                        else kb_completion()
                     ),
                 )
                 return
@@ -220,14 +241,15 @@ async def _finish_checkin(
     await callback.message.answer(interpretation)
 
     if workout:
-        micro = f"\n\n💡 <i>{workout.micro_learning}</i>" if workout.micro_learning else ""
         workout_text = filter_strength_text(workout.text, user.strength_format if day_type == "strength" else None)
         is_strength = day_type == "strength" and decision.version != "recovery"
+        tips = _get_tip_lines(user.level, day_index)
+        tips_block = f"\n\n{tips}" if tips else ""
         await callback.message.answer(
-            f"📋 <b>День {day_index} из 28 — {workout.title}</b>\n\n"
-            f"{workout_text}{micro}",
+            f"📋 <b>День {day_index} из 28 — {workout.title}</b>{tips_block}\n\n"
+            f"{workout_text}",
             parse_mode="HTML",
-            reply_markup=kb_strength_day_options() if is_strength else kb_mark_workout(),
+            reply_markup=kb_completion_strength() if is_strength else kb_completion(),
         )
     else:
         await callback.message.answer(

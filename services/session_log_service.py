@@ -20,6 +20,17 @@ class SessionLogService:
         )
         return result.scalar_one_or_none()
 
+    async def delete_today(self, user_id: int) -> None:
+        """Delete today's session log (used on progress reset)."""
+        from sqlalchemy import delete
+        await self.session.execute(
+            delete(SessionLog).where(
+                SessionLog.user_id == user_id,
+                SessionLog.date == date.today(),
+            )
+        )
+        await self.session.commit()
+
     async def get_or_create_today(self, user_id: int, day_index: int) -> tuple[SessionLog, bool]:
         log = await self.get_today(user_id)
         if log:

@@ -154,6 +154,17 @@ def kb_completion() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def kb_completion_strength() -> InlineKeyboardMarkup:
+    """Completion buttons + custom workout option for strength days."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Выполнено", callback_data="wk:status:done")
+    builder.button(text="⚡ Частично", callback_data="wk:status:partial")
+    builder.button(text="❌ Пропустил(а)", callback_data="wk:status:skipped")
+    builder.button(text="🔄 Сделаю свою тренировку", callback_data="wk:custom")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def kb_effort() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for i in range(1, 6):

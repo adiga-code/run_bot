@@ -36,7 +36,9 @@
       "Bash(python -m pytest tests/ -q)",
       "Bash(\"C:\\\\Users\\\\Hezh PC\\\\Desktop\\\\projects\\\\фриланс_19_03\\\\.env.example\")",
       "Bash(pandoc \"/c/Users/Hezh PC/Downloads/Готовый вариант MVP трен Дамир \\(3\\).docx\" -o /tmp/level5.md)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(ls -lh \"C:\\\\Users\\\\Hezh PC\\\\Downloads/Готовый вариант MVP трен Дамир \\(4\\).docx\")",
+      "Bash(pandoc \"C:\\\\Users\\\\Hezh PC\\\\Downloads\\\\Готовый вариант MVP трен Дамир \\(4\\).docx\" -t plain)"
     ]
   }
 }

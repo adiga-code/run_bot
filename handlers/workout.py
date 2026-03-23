@@ -5,7 +5,7 @@ from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from handlers.utils import safe_answer
-from keyboards.builders import kb_completion, kb_effort, kb_had_pain, kb_main_menu, kb_strength_day_options
+from keyboards.builders import kb_completion, kb_effort, kb_had_pain, kb_main_menu
 from services.session_log_service import SessionLogService
 
 router = Router()
@@ -33,32 +33,29 @@ BASIC_WORKOUT_TEXT = (
 )
 
 
-@router.callback_query(F.data == "wk:mark")
-async def cb_mark_start(callback: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(WorkoutStates.completion)
-    await callback.message.edit_reply_markup()
-    await safe_answer(callback)
-    await callback.message.answer(
-        "Как прошла тренировка?",
-        reply_markup=kb_completion(),
-    )
-
-
 @router.callback_query(F.data == "wk:custom")
 async def cb_custom_workout(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.message.edit_reply_markup()
+    """Replace the workout message with basic workout + completion buttons."""
     await safe_answer(callback)
     await state.set_state(WorkoutStates.completion)
-    await callback.message.answer(
-        f"{BASIC_WORKOUT_TEXT}\n\nОтметь результат после выполнения:",
-        parse_mode="HTML",
-        reply_markup=kb_completion(),
-    )
+    try:
+        await callback.message.edit_text(
+            f"{BASIC_WORKOUT_TEXT}\n\nОтметь результат после выполнения:",
+            parse_mode="HTML",
+            reply_markup=kb_completion(),
+        )
+    except Exception:
+        await callback.message.answer(
+            f"{BASIC_WORKOUT_TEXT}\n\nОтметь результат после выполнения:",
+            parse_mode="HTML",
+            reply_markup=kb_completion(),
+        )
 
 
-@router.callback_query(WorkoutStates.completion, F.data.startswith("wk:status:"))
+@router.callback_query(F.data.startswith("wk:status:"))
 async def cb_completion_status(callback: CallbackQuery, state: FSMContext) -> None:
     status = callback.data.split(":")[2]
+    await state.set_state(WorkoutStates.completion)
     await state.update_data(status=status)
     await callback.message.edit_reply_markup()
     await safe_answer(callback)
