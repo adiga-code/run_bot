@@ -231,7 +231,7 @@ async def _send_report(message, session: AsyncSession, user_id: int, as_file: bo
     DAY_TYPE = {"run": "Бег", "strength": "Силовая", "recovery": "Восстановление", "rest": "Отдых"}
 
     level_name = LEVEL_NAMES.get(user.level, "?")
-    current_day = user_svc.current_program_day(user) or "?"
+    current_day = await user_svc.current_program_day(user) or "?"
 
     if as_file:
         buf = io.StringIO()
@@ -302,7 +302,7 @@ async def cb_admin_manage(callback: CallbackQuery, session: AsyncSession) -> Non
         await callback.message.answer("Пользователь не найден.")
         return
 
-    current_day = user_svc.current_program_day(user) or "?"
+    current_day = await user_svc.current_program_day(user) or "?"
     level_name = LEVEL_NAMES.get(user.level, "?")
     await callback.message.answer(
         f"⚙️ <b>{user.full_name}</b>\n"
