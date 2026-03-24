@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 
 from aiogram import F, Router
@@ -12,13 +13,15 @@ from data.interpretations import get_interpretation
 from engine.red_flags import CheckinData
 from engine.rule_engine import decide_workout_version
 from keyboards.builders import (
-    kb_main_menu, kb_completion, kb_completion_strength, kb_pain_checkin,
-    kb_pain_increases_checkin, kb_sleep, kb_wellbeing,
+    kb_main_menu, kb_completion, kb_completion_strength, kb_mark_workout,
+    kb_pain_checkin, kb_pain_increases_checkin, kb_sleep, kb_wellbeing,
 )
 from handlers.utils import safe_answer, filter_strength_text
 from services.session_log_service import SessionLogService
 from services.user_service import UserService
 from services.workout_service import WorkoutService
+
+logger = logging.getLogger(__name__)
 
 _TIPS_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "day_tips.json")
 with open(_TIPS_PATH, encoding="utf-8") as _f:
@@ -232,6 +235,11 @@ async def _finish_checkin(
         checkin_done=True,
     )
 
+    logger.info(
+        "Checkin user=%s wellbeing=%s sleep=%s pain=%s → version=%s",
+        user_id, checkin.wellbeing, checkin.sleep_quality, checkin.pain_level, decision.version,
+    )
+
     interpretation = get_interpretation(
         version=decision.version,
         checkin_wellbeing=checkin.wellbeing,
@@ -245,6 +253,10 @@ async def _finish_checkin(
         is_strength = day_type == "strength" and decision.version != "recovery"
         tips = _get_tip_lines(user.level, day_index)
         tips_block = f"\n\n{tips}" if tips else ""
+        logger.info(
+            "Sent workout day=%s version=%s to user=%s",
+            day_index, decision.version, user_id,
+        )
         await callback.message.answer(
             f"📋 <b>День {day_index} из 28 — {workout.title}</b>{tips_block}\n\n"
             f"{workout_text}",

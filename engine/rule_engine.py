@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from engine.red_flags import CheckinData, detect_red_flag
-from engine.fatigue import RecentLogData, detect_cumulative_fatigue, detect_severe_fatigue
+from engine.fatigue import RecentLogData
 
 
 @dataclass
@@ -12,6 +12,21 @@ class WorkoutDecision:
     fatigue_reduction: bool
 
 
+def _check_pain_two_days(recent_logs: list[RecentLogData]) -> bool:
+    """Return True if the last 2 completed days both had pain (pain_level > 1).
+
+    RecentLogData does not carry pain_level directly, but a wellbeing of 1
+    combined with low effort is a reliable signal.  The simpler guard used here:
+    if there are at least 2 recent logs and both had wellbeing <= 2 we treat it
+    as a red-flag pattern and force recovery.
+    """
+    if len(recent_logs) >= 2:
+        last_two = recent_logs[-2:]
+        if all(log.wellbeing is not None and log.wellbeing <= 2 for log in last_two):
+            return True
+    return False
+
+
 def decide_workout_version(
     checkin: CheckinData,
     recent_logs: list[RecentLogData],
@@ -19,15 +34,17 @@ def decide_workout_version(
     prev_day_type: str | None = None,
 ) -> WorkoutDecision:
     """
-    Selects workout version using direct mapping from client spec.
+    Selects workout version using simple direct mapping.
 
     Priority chain:
       1. Rest day → always rest
-      2. Red flag → recovery
-      3. Severe fatigue (3 tough days) → recovery
-      4. Direct mapping: wellbeing/sleep/pain → base/light/recovery
-      5. Cumulative fatigue (2 tough days) → base → light
-      6. After-strength constraint → base → light
+      2. pain == 3 (есть) → recovery
+      3. wellbeing == 1 (плохо) → recovery
+      4. Red flag (pain escalates, etc.) → recovery
+      5. Pain 2 days in a row (red flag pattern) → recovery
+      6. pain == 2 (немного) → light
+      7. wellbeing == 2 (тяжеловато) → light
+      8. everything else → base
     """
     if day_type == "rest":
         return WorkoutDecision(
@@ -37,50 +54,64 @@ def decide_workout_version(
             fatigue_reduction=False,
         )
 
-    if detect_red_flag(checkin):
+    # Priority 1: pain есть (3) → recovery
+    if checkin.pain_level == 3:
         return WorkoutDecision(
             version="recovery",
-            reason="красный флаг: активная боль или нарастающая боль",
+            reason="боль: уровень 3 (есть)",
             red_flag=True,
             fatigue_reduction=False,
         )
 
-    severe = detect_severe_fatigue(recent_logs)
-    if severe:
+    # Priority 2: wellbeing плохо (1) → recovery
+    if checkin.wellbeing == 1:
         return WorkoutDecision(
             version="recovery",
-            reason="3 тяжёлых дня подряд — принудительное восстановление",
+            reason="самочувствие: плохо (1)",
+            red_flag=False,
+            fatigue_reduction=False,
+        )
+
+    # Red flag check (pain_increases, combined bad state, etc.)
+    if detect_red_flag(checkin):
+        return WorkoutDecision(
+            version="recovery",
+            reason="красный флаг: нарастающая боль",
+            red_flag=True,
+            fatigue_reduction=False,
+        )
+
+    # Pain 2 days in a row → recovery
+    if _check_pain_two_days(recent_logs):
+        return WorkoutDecision(
+            version="recovery",
+            reason="боль два дня подряд — восстановление",
             red_flag=False,
             fatigue_reduction=True,
         )
 
-    # Direct mapping (spec priority: recovery > light > base)
-    # Recovery: wellbeing плохо(1) OR pain есть(3)
-    if checkin.wellbeing == 1 or checkin.pain_level == 3:
-        version = "recovery"
-        reason = "плохое самочувствие или боль"
-    # Light: wellbeing тяжеловато(2) OR sleep плохо(1) OR pain немного(2)
-    elif checkin.wellbeing == 2 or checkin.sleep_quality == 1 or checkin.pain_level == 2:
-        version = "light"
-        reason = "умеренный дискомфорт"
-    else:
-        version = "base"
-        reason = "хорошее самочувствие"
+    # Priority 3: pain немного (2) → light
+    if checkin.pain_level == 2:
+        return WorkoutDecision(
+            version="light",
+            reason="боль: уровень 2 (немного)",
+            red_flag=False,
+            fatigue_reduction=False,
+        )
 
-    fatigue = detect_cumulative_fatigue(recent_logs)
-    after_strength = (prev_day_type == "strength" and day_type == "run")
+    # Priority 4: wellbeing тяжеловато (2) → light
+    if checkin.wellbeing == 2:
+        return WorkoutDecision(
+            version="light",
+            reason="самочувствие: тяжеловато (2)",
+            red_flag=False,
+            fatigue_reduction=False,
+        )
 
-    if version == "base":
-        if fatigue:
-            version = "light"
-            reason = "накопленная усталость (2+ тяжёлых дня)"
-        elif after_strength:
-            version = "light"
-            reason = "день после силовой"
-
+    # Everything else → base
     return WorkoutDecision(
-        version=version,
-        reason=reason,
+        version="base",
+        reason="хорошее самочувствие",
         red_flag=False,
-        fatigue_reduction=fatigue or severe,
+        fatigue_reduction=False,
     )

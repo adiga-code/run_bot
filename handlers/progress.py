@@ -131,7 +131,7 @@ async def cb_reset_day(callback: CallbackQuery, state: FSMContext, session: Asyn
 
     await state.clear()
     await callback.message.edit_reply_markup()
-    await callback.answer()
+    await safe_answer(callback)
     await callback.message.answer(
         "🔄 День сброшен. Можешь начать чек-ин заново!\n\n"
         "Нажми «Сегодняшняя тренировка» 👇",

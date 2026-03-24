@@ -1,27 +1,30 @@
+import logging
 from datetime import date
 
 from aiogram import F, Router
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from handlers.utils import safe_answer
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-
 from keyboards.builders import (
     kb_admin_application, kb_admin_approve, kb_admin_day_mode, kb_admin_level_picker,
     kb_admin_manage, kb_admin_menu, kb_admin_report_actions, kb_admin_report_users,
     kb_admin_start_choice, kb_main_menu,
 )
+from services.user_service import UserService
+from services.whitelist_service import WhitelistService
+
+logger = logging.getLogger(__name__)
 
 
 class AdminActionStates(StatesGroup):
-    jump_day = State()   # FSM data: target_user_id
-    send_msg = State()   # FSM data: target_user_id
-from services.user_service import UserService
-from services.whitelist_service import WhitelistService
+    jump_day = State()
+    send_msg = State()
 
 router = Router()
 
@@ -410,6 +413,17 @@ async def admin_jump_day_input(message: Message, state: FSMContext, session: Asy
     new_start = date.today() - timedelta(days=target_day - 1)
     await user_svc.update(user, program_start_date=new_start, week_repeat_count=0)
 
+    # Delete today's SessionLog so the next checkin creates a fresh one with the correct day_index
+    from database.models import SessionLog
+    await session.execute(
+        delete(SessionLog).where(
+            SessionLog.user_id == target_user_id,
+            SessionLog.date == date.today(),
+        )
+    )
+    await session.commit()
+    logger.info("Admin %s jumped user %s to day %s; deleted today's SessionLog", message.from_user.id, target_user_id, target_day)
+
     await message.answer(f"✅ Пользователь переведён на <b>день {target_day}</b>.", parse_mode="HTML")
 
     try:
@@ -748,6 +762,7 @@ async def cmd_set_level(message: Message, session: AsyncSession) -> None:
 
     await user_svc.update(user, level=new_level)
     level_name = LEVEL_NAMES[new_level]
+    logger.info("Admin %s set user %s to level=%s (%s)", message.from_user.id, target_id, new_level, level_name)
     await message.answer(
         f"✅ Уровень пользователя <code>{target_id}</code> изменён на "
         f"<b>{level_name} ({new_level})</b>.",
@@ -779,6 +794,19 @@ async def _activate_user(
 
     start_date = date.today() if start_today else date.today() + timedelta(days=1)
     await user_svc.update(user, level=level, status="active", program_start_date=start_date)
+
+    if start_today:
+        from database.models import SessionLog
+        day1_log = SessionLog(
+            user_id=user.telegram_id,
+            date=date.today(),
+            day_index=1,
+        )
+        session.add(day1_log)
+        await session.commit()
+        logger.info("Admin %s activated user %s with start_today; created Day 1 SessionLog", callback.from_user.id, user_id)
+    else:
+        logger.info("Admin %s activated user %s (start tomorrow, level=%s)", callback.from_user.id, user_id, level)
 
     level_name = LEVEL_NAMES[level]
     start_label = "сегодня" if start_today else "завтра"

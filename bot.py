@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import logging.handlers
+import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -11,7 +13,29 @@ from database.whitelist_middleware import WhitelistMiddleware
 from handlers import admin, checkin, onboarding, progress, reminders, start, workout
 from scheduler.tasks import setup_scheduler
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+# Ensure logs directory exists
+_LOGS_DIR = "/app/logs"
+os.makedirs(_LOGS_DIR, exist_ok=True)
+
+# Root logger: console + rotating file
+_root_logger = logging.getLogger()
+_root_logger.setLevel(logging.INFO)
+
+_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+_console_handler = logging.StreamHandler()
+_console_handler.setFormatter(_formatter)
+_root_logger.addHandler(_console_handler)
+
+_file_handler = logging.handlers.RotatingFileHandler(
+    os.path.join(_LOGS_DIR, "bot.log"),
+    maxBytes=5 * 1024 * 1024,  # 5 MB
+    backupCount=3,
+    encoding="utf-8",
+)
+_file_handler.setFormatter(_formatter)
+_root_logger.addHandler(_file_handler)
+
 logger = logging.getLogger(__name__)
 
 

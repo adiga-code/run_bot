@@ -69,16 +69,19 @@ class UserService:
 
     async def reset_progress(self, user: User) -> User:
         """Reset user to pre-onboarding state so they can start over."""
-        from services.session_log_service import SessionLogService
-        log_svc = SessionLogService(self.session)
-        await log_svc.delete_today(user.telegram_id)
+        from sqlalchemy import delete
+        from database.models import SessionLog
+        # Delete ALL session logs for this user, not just today's
+        await self.session.execute(
+            delete(SessionLog).where(SessionLog.user_id == user.telegram_id)
+        )
+        await self.session.commit()
         return await self.update(
             user,
             onboarding_complete=False,
             status="pending",
             program_start_date=None,
             level=None,
-            streak=0,
             week_repeat_count=0,
         )
 
