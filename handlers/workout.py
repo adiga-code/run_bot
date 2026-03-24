@@ -53,7 +53,7 @@ async def cb_custom_workout(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.callback_query(F.data.startswith("wk:status:"))
-async def cb_completion_status(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_completion_status(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     status = callback.data.split(":")[2]
     await state.set_state(WorkoutStates.completion)
     await state.update_data(status=status)
@@ -62,7 +62,7 @@ async def cb_completion_status(callback: CallbackQuery, state: FSMContext) -> No
 
     if status == "skipped":
         await state.clear()
-        await _save_completion(callback, {"status": "skipped", "effort": None, "had_pain": None}, None)
+        await _save_completion(callback, {"status": "skipped", "effort": None, "had_pain": None}, session)
         return
 
     await state.set_state(WorkoutStates.effort)

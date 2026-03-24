@@ -14,7 +14,7 @@ from engine.red_flags import CheckinData
 from engine.rule_engine import decide_workout_version
 from keyboards.builders import (
     kb_main_menu, kb_completion, kb_completion_strength, kb_mark_workout,
-    kb_pain_checkin, kb_pain_increases_checkin, kb_sleep, kb_wellbeing,
+    kb_pain_checkin, kb_pain_increases_checkin, kb_sleep, kb_stress, kb_wellbeing,
 )
 from handlers.utils import safe_answer, filter_strength_text
 from services.session_log_service import SessionLogService
@@ -47,6 +47,7 @@ class CheckinStates(StatesGroup):
     sleep = State()
     pain = State()
     pain_increases = State()
+    stress = State()
 
 
 async def _start_checkin(target, state: FSMContext) -> None:
@@ -169,18 +170,35 @@ async def ci_pain(callback: CallbackQuery, state: FSMContext, session: AsyncSess
         )
     else:
         await state.update_data(pain_increases=None)
-        data = await state.get_data()
-        await state.clear()
-        await _finish_checkin(callback, data, session)
+        await state.set_state(CheckinStates.stress)
+        await callback.message.answer(
+            "😤 Был ли сильный внешний стресс за последние 24 часа?",
+            reply_markup=kb_stress(),
+        )
 
 
 # ── Pain increases ────────────────────────────────────────────────────────────
 
 @router.callback_query(CheckinStates.pain_increases, F.data.startswith("ci:pain_inc:"))
-async def ci_pain_increases(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+async def ci_pain_increases(callback: CallbackQuery, state: FSMContext) -> None:
     raw = callback.data.split(":")[2]
     pain_increases = True if raw == "yes" else (False if raw == "no" else None)
     await state.update_data(pain_increases=pain_increases)
+    await callback.message.edit_reply_markup()
+    await safe_answer(callback)
+    await state.set_state(CheckinStates.stress)
+    await callback.message.answer(
+        "😤 Был ли сильный внешний стресс за последние 24 часа?",
+        reply_markup=kb_stress(),
+    )
+
+
+# ── Stress ────────────────────────────────────────────────────────────────────
+
+@router.callback_query(CheckinStates.stress, F.data.startswith("ci:stress:"))
+async def ci_stress(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    value = int(callback.data.split(":")[2])
+    await state.update_data(stress_level=value)
     await callback.message.edit_reply_markup()
     await safe_answer(callback)
     data = await state.get_data()
@@ -202,6 +220,7 @@ async def _finish_checkin(
         sleep_quality=data["sleep"],
         pain_level=data["pain"],
         pain_increases=data.get("pain_increases"),
+        stress_level=data.get("stress_level", 1),
     )
 
     user_svc = UserService(session)
@@ -228,6 +247,7 @@ async def _finish_checkin(
         sleep_quality=checkin.sleep_quality,
         pain_level=checkin.pain_level,
         pain_increases=checkin.pain_increases,
+        stress_level=checkin.stress_level,
         assigned_workout_id=workout.id if workout else None,
         assigned_version=decision.version,
         red_flag=decision.red_flag,
@@ -236,8 +256,9 @@ async def _finish_checkin(
     )
 
     logger.info(
-        "Checkin user=%s wellbeing=%s sleep=%s pain=%s → version=%s",
-        user_id, checkin.wellbeing, checkin.sleep_quality, checkin.pain_level, decision.version,
+        "Checkin user=%s wellbeing=%s sleep=%s pain=%s stress=%s → version=%s",
+        user_id, checkin.wellbeing, checkin.sleep_quality, checkin.pain_level,
+        checkin.stress_level, decision.version,
     )
 
     interpretation = get_interpretation(

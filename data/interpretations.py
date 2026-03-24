@@ -52,6 +52,6 @@ def get_interpretation(version: str, checkin_wellbeing: int, red_flag: bool, fat
         # Pick most relevant light reason
         return INTERPRETATIONS["light_wellbeing"]
     # base
-    if checkin_wellbeing == 3:
+    if checkin_wellbeing >= 4:
         return INTERPRETATIONS["base_great"]
     return INTERPRETATIONS["base_ok"]

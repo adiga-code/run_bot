@@ -88,7 +88,7 @@ async def _send_progress(target, user_id: int, session: AsyncSession) -> None:
     if isinstance(target, CallbackQuery):
         await target.message.edit_reply_markup()
         await target.message.answer(text, parse_mode="HTML", reply_markup=kb_progress_menu())
-        await target.answer()
+        await safe_answer(target)
     else:
         await target.answer(text, parse_mode="HTML", reply_markup=kb_progress_menu())
 
@@ -120,6 +120,7 @@ async def cb_reset_day(callback: CallbackQuery, state: FSMContext, session: Asyn
         sleep_quality=None,
         pain_level=None,
         pain_increases=None,
+        stress_level=None,
         assigned_workout_id=None,
         assigned_version=None,
         red_flag=False,

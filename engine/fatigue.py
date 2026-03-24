@@ -9,14 +9,18 @@ class RecentLogData:
     sleep_quality: int             # 1=плохо, 2=нормально, 3=хорошо
     completion_status: str | None  # done / partial / skipped
     wellbeing: int = 3             # 1=плохо, 2=тяжеловато, 3=нормально, 4=хорошо, 5=отлично
+    stress_level: int = 1          # 1=нет, 2=умеренный, 3=сильный
+    day_type: str | None = None    # run / strength / recovery / rest
 
 
 def _is_tough_day(log: RecentLogData) -> bool:
     """
     A day is "tough" if wellbeing ≤ 2 (тяжеловато/плохо),
-    or sleep is bad, or high effort, or workout was partial/skipped.
+    or stress >= 2, or sleep is bad, or high effort, or workout was partial/skipped.
     """
     if log.wellbeing <= 2:
+        return True
+    if log.stress_level >= 2:
         return True
     if log.sleep_quality == 1:
         return True
