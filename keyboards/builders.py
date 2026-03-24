@@ -206,6 +206,7 @@ def kb_admin_menu() -> InlineKeyboardMarkup:
     builder.button(text="📋 Отчёты", callback_data="adm:menu:reports")
     builder.button(text="📊 Статистика", callback_data="adm:menu:stats")
     builder.button(text="🔒 Whitelist", callback_data="adm:menu:whitelist")
+    builder.button(text="📢 Отправить чек-ин всем", callback_data="adm:broadcast:checkin")
     builder.adjust(1)
     return builder.as_markup()
 

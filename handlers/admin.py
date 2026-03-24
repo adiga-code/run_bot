@@ -157,6 +157,52 @@ async def cb_admin_users(callback: CallbackQuery, session: AsyncSession) -> None
         )
 
 
+@router.callback_query(F.data == "adm:broadcast:checkin")
+async def cb_broadcast_checkin(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    from datetime import date as date_cls
+    from database.models import SessionLog
+    from services.session_log_service import SessionLogService
+
+    user_svc = UserService(session)
+    log_svc = SessionLogService(session)
+    users = await user_svc.all_active()
+
+    sent, skipped = 0, 0
+    for user in users:
+        day = await user_svc.current_program_day(user)
+        if not day:
+            skipped += 1
+            continue
+        # Ensure today's log exists
+        await log_svc.get_or_create_today(user.telegram_id, day)
+        try:
+            await callback.bot.send_message(
+                chat_id=user.telegram_id,
+                text=(
+                    "🌅 Доброе утро!\n\n"
+                    "Время пройти утренний чек-ин и узнать свою тренировку на сегодня.\n\n"
+                    "Нажми /checkin или кнопку ниже 👇"
+                ),
+                reply_markup=kb_main_menu(),
+            )
+            sent += 1
+        except Exception:
+            skipped += 1
+
+    logger.info("Admin %s broadcast checkin: sent=%s skipped=%s", callback.from_user.id, sent, skipped)
+    await callback.message.answer(
+        f"✅ Чек-ин отправлен: <b>{sent}</b> пользователей\n"
+        f"Пропущено (заблокировали бот или нет дня): <b>{skipped}</b>",
+        parse_mode="HTML",
+        reply_markup=kb_admin_menu(),
+    )
+
+
 @router.callback_query(F.data.in_({"adm:menu:reports", "adm:menu:back"}))
 async def cb_admin_reports(callback: CallbackQuery, session: AsyncSession) -> None:
     if not is_admin(callback.from_user.id):
