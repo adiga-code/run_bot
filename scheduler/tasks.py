@@ -74,8 +74,11 @@ async def _check_week_completion(session_maker: async_sessionmaker[AsyncSession]
 
 async def _send_evening_reminders(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> None:
     """
-    Run every minute. Sends evening completion reminders to users
-    who did check-in but haven't marked workout completion.
+    Run every minute. Sends evening message to ALL active users whose evening hour has come.
+    Branches by completion status:
+      - done/partial → support closing message
+      - checkin done but no status → gentle reminder to mark
+      - no checkin and no status → "day slipped, that's ok" message
     """
     utc_hour = datetime.now(timezone.utc).hour
 
@@ -83,14 +86,43 @@ async def _send_evening_reminders(bot: Bot, session_maker: async_sessionmaker[As
         log_svc = SessionLogService(session)
         logs = await log_svc.pending_evening_reminder(utc_hour)
         for log in logs:
+            status = log.completion_status
+            checkin_done = log.checkin_done
+
+            if status == "done":
+                text = (
+                    "🌙 Отличный день!\n\n"
+                    "Тренировка выполнена — это и есть прогресс. "
+                    "Дай телу восстановиться до завтра 💪"
+                )
+                markup = None
+            elif status == "partial":
+                text = (
+                    "🌙 Хорошая работа!\n\n"
+                    "Частичная тренировка — тоже движение вперёд. "
+                    "Завтра продолжаем 🙌"
+                )
+                markup = None
+            elif checkin_done and not status:
+                text = (
+                    "🌙 Напоминание!\n\n"
+                    "Ты сегодня занимался(ась)? Отметь результат — "
+                    "это помогает отслеживать твой прогресс 👇"
+                )
+                markup = kb_mark_workout()
+            else:
+                # No checkin and no status
+                text = (
+                    "🌙 Похоже, сегодня выпал день — ничего страшного.\n\n"
+                    "Завтра возвращаемся в ритм 🙌"
+                )
+                markup = None
+
             try:
                 await bot.send_message(
                     chat_id=log.user_id,
-                    text=(
-                        "🌙 Вечерняя отметка!\n\n"
-                        "Как прошла тренировка сегодня?"
-                    ),
-                    reply_markup=kb_mark_workout(),
+                    text=text,
+                    reply_markup=markup,
                 )
                 await log_svc.update(log, evening_sent=True)
             except Exception:

@@ -158,6 +158,7 @@ class SessionLogService:
         return list(result.scalars().all())
 
     async def pending_evening_reminder(self, utc_hour: int) -> list[SessionLog]:
+        """Returns ALL active users whose evening hour has come and reminder not yet sent."""
         from sqlalchemy.orm import joinedload
         from database.models import User
 
@@ -168,8 +169,6 @@ class SessionLogService:
             .where(
                 SessionLog.date == date.today(),
                 SessionLog.evening_sent == False,
-                SessionLog.checkin_done == True,
-                SessionLog.completion_status == None,
                 User.reminders_enabled == True,
                 ((utc_hour + User.timezone_offset) % 24) == User.evening_reminder_hour,
             )
