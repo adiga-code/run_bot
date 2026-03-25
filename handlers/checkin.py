@@ -15,6 +15,7 @@ from engine.rule_engine import decide_workout_version
 from keyboards.builders import (
     kb_main_menu, kb_completion, kb_completion_strength, kb_mark_workout,
     kb_pain_checkin, kb_pain_increases_checkin, kb_sleep, kb_stress, kb_wellbeing,
+    kb_yesterday_completion,
 )
 from handlers.utils import safe_answer, filter_strength_text
 from services.session_log_service import SessionLogService
@@ -43,6 +44,7 @@ router = Router()
 
 
 class CheckinStates(StatesGroup):
+    yesterday = State()
     wellbeing = State()
     sleep = State()
     pain = State()
@@ -59,6 +61,25 @@ async def _start_checkin(target, state: FSMContext) -> None:
         await target.answer(text, parse_mode="HTML", reply_markup=kb_wellbeing())
 
 
+async def _check_yesterday_and_start(
+    target, state: FSMContext, log_svc: SessionLogService
+) -> bool:
+    """Check if yesterday's log needs completion. Returns True if we intercepted."""
+    user_id = (
+        target.from_user.id if isinstance(target, Message) else target.from_user.id
+    )
+    yesterday_log = await log_svc.get_yesterday(user_id)
+    if yesterday_log and yesterday_log.completion_status is None:
+        await state.set_state(CheckinStates.yesterday)
+        text = "📅 Вчера у тебя была тренировка — ты её выполнил(а)?"
+        if isinstance(target, Message):
+            await target.answer(text, reply_markup=kb_yesterday_completion())
+        else:
+            await target.message.answer(text, reply_markup=kb_yesterday_completion())
+        return True
+    return False
+
+
 @router.message(Command("checkin"))
 async def cmd_checkin(message: Message, state: FSMContext, session: AsyncSession) -> None:
     user_svc = UserService(session)
@@ -68,6 +89,10 @@ async def cmd_checkin(message: Message, state: FSMContext, session: AsyncSession
         return
     if user.status != "active":
         await message.answer("⏳ Ожидаем подтверждения тренера.")
+        return
+
+    log_svc = SessionLogService(session)
+    if await _check_yesterday_and_start(message, state, log_svc):
         return
     await _start_checkin(message, state)
 
@@ -122,8 +147,25 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
         return
 
     await callback.message.edit_reply_markup()
-    await _start_checkin(callback, state)
     await safe_answer(callback)
+    if await _check_yesterday_and_start(callback, state, log_svc):
+        return
+    await _start_checkin(callback, state)
+
+
+# ── Yesterday completion ──────────────────────────────────────────────────────
+
+@router.callback_query(CheckinStates.yesterday, F.data.startswith("ci:yday:"))
+async def ci_yesterday(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    status = callback.data.split(":")[2]  # done / partial / skipped
+    log_svc = SessionLogService(session)
+    yesterday_log = await log_svc.get_yesterday(callback.from_user.id)
+    if yesterday_log:
+        await log_svc.update(yesterday_log, completion_status=status)
+        logger.info("User %s marked yesterday (day %s) as %s", callback.from_user.id, yesterday_log.day_index, status)
+    await callback.message.edit_reply_markup()
+    await safe_answer(callback)
+    await _start_checkin(callback, state)
 
 
 # ── Wellbeing ─────────────────────────────────────────────────────────────────

@@ -134,6 +134,15 @@ def kb_pain_checkin() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def kb_yesterday_completion() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Выполнил(а)", callback_data="ci:yday:done")
+    builder.button(text="⚡ Частично", callback_data="ci:yday:partial")
+    builder.button(text="❌ Нет", callback_data="ci:yday:skipped")
+    builder.adjust(3)
+    return builder.as_markup()
+
+
 def kb_pain_increases_checkin() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="Нет", callback_data="ci:pain_inc:no")
@@ -234,8 +243,31 @@ def kb_admin_manage(user_id: int) -> InlineKeyboardMarkup:
     builder.button(text="🔄 Изменить режим дня", callback_data=f"adm:mode:{user_id}")
     builder.button(text="⏭️ Перейти к дню", callback_data=f"adm:jump:{user_id}")
     builder.button(text="🎯 Изменить уровень", callback_data=f"adm:pick:{user_id}")
+    builder.button(text="📝 Отметить тренировку", callback_data=f"adm:markday:{user_id}")
     builder.button(text="✉️ Отправить сообщение", callback_data=f"adm:msg:{user_id}")
     builder.button(text="◀️ Назад", callback_data=f"adm:report:view:{user_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_admin_mark_day_picker(user_id: int, logs: list) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for log in logs:
+        builder.button(
+            text=f"День {log.day_index} ({log.date.strftime('%d.%m')})",
+            callback_data=f"adm:markday:day:{user_id}:{log.day_index}",
+        )
+    builder.button(text="◀️ Назад", callback_data=f"adm:manage:{user_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_admin_mark_day_status(user_id: int, day_index: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Выполнено", callback_data=f"adm:markday:set:{user_id}:{day_index}:done")
+    builder.button(text="⚡ Частично", callback_data=f"adm:markday:set:{user_id}:{day_index}:partial")
+    builder.button(text="❌ Пропущено", callback_data=f"adm:markday:set:{user_id}:{day_index}:skipped")
+    builder.button(text="◀️ Назад", callback_data=f"adm:markday:{user_id}")
     builder.adjust(1)
     return builder.as_markup()
 

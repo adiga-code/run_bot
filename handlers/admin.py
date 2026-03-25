@@ -13,7 +13,8 @@ from config import settings
 from handlers.utils import safe_answer
 from keyboards.builders import (
     kb_admin_application, kb_admin_approve, kb_admin_day_mode, kb_admin_level_picker,
-    kb_admin_manage, kb_admin_menu, kb_admin_report_actions, kb_admin_report_users,
+    kb_admin_manage, kb_admin_mark_day_picker, kb_admin_mark_day_status,
+    kb_admin_menu, kb_admin_report_actions, kb_admin_report_users,
     kb_admin_start_choice, kb_main_menu,
 )
 from services.user_service import UserService
@@ -601,6 +602,101 @@ async def cb_app_reject(callback: CallbackQuery) -> None:
         )
     except Exception:
         pass
+
+
+# ── Mark day completion (admin) ────────────────────────────────────────────────
+
+@router.callback_query(
+    F.data.startswith("adm:markday:")
+    & ~F.data.startswith("adm:markday:day:")
+    & ~F.data.startswith("adm:markday:set:")
+)
+async def cb_admin_mark_day(callback: CallbackQuery, session: AsyncSession) -> None:
+    """Show list of all past unmarked days for the user."""
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    from services.session_log_service import SessionLogService
+
+    user_id = int(callback.data.split(":")[2])
+    user_svc = UserService(session)
+    log_svc = SessionLogService(session)
+
+    user = await user_svc.get(user_id)
+    if not user:
+        await callback.message.answer("Пользователь не найден.")
+        return
+
+    logs = await log_svc.get_unmarked_past(user_id)
+    if not logs:
+        await callback.message.answer(
+            f"✅ У <b>{user.full_name}</b> нет неотмеченных тренировок.",
+            parse_mode="HTML",
+            reply_markup=kb_admin_manage(user_id),
+        )
+        return
+
+    await callback.message.answer(
+        f"📝 <b>{user.full_name}</b> — выбери день для отметки:",
+        parse_mode="HTML",
+        reply_markup=kb_admin_mark_day_picker(user_id, logs),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:markday:day:"))
+async def cb_admin_mark_day_pick(callback: CallbackQuery) -> None:
+    """Show done/partial/skipped buttons for the chosen day."""
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    parts = callback.data.split(":")  # adm:markday:day:<user_id>:<day_index>
+    user_id, day_index = int(parts[3]), int(parts[4])
+    await callback.message.answer(
+        f"Выбери статус для <b>дня {day_index}</b>:",
+        parse_mode="HTML",
+        reply_markup=kb_admin_mark_day_status(user_id, day_index),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:markday:set:"))
+async def cb_admin_mark_day_set(callback: CallbackQuery, session: AsyncSession) -> None:
+    """Save completion status for the selected day."""
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    from sqlalchemy import select as sa_select
+    from database.models import SessionLog
+
+    parts = callback.data.split(":")  # adm:markday:set:<user_id>:<day_index>:<status>
+    user_id, day_index, status = int(parts[3]), int(parts[4]), parts[5]
+
+    result = await session.execute(
+        sa_select(SessionLog).where(
+            SessionLog.user_id == user_id,
+            SessionLog.day_index == day_index,
+        )
+    )
+    log = result.scalar_one_or_none()
+    if not log:
+        await callback.message.answer("Лог не найден.", reply_markup=kb_admin_manage(user_id))
+        return
+
+    log.completion_status = status
+    await session.commit()
+
+    STATUS_LABELS = {"done": "✅ Выполнено", "partial": "⚡ Частично", "skipped": "❌ Пропущено"}
+    logger.info("Admin %s marked user %s day %s as %s", callback.from_user.id, user_id, day_index, status)
+    await callback.message.answer(
+        f"День <b>{day_index}</b> отмечен как <b>{STATUS_LABELS[status]}</b>.",
+        parse_mode="HTML",
+        reply_markup=kb_admin_manage(user_id),
+    )
 
 
 # ── Whitelist management ───────────────────────────────────────────────────────

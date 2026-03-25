@@ -20,6 +20,28 @@ class SessionLogService:
         )
         return result.scalar_one_or_none()
 
+    async def get_yesterday(self, user_id: int) -> SessionLog | None:
+        from datetime import timedelta
+        yesterday = date.today() - timedelta(days=1)
+        result = await self.session.execute(
+            select(SessionLog).where(
+                SessionLog.user_id == user_id,
+                SessionLog.date == yesterday,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_unmarked_past(self, user_id: int) -> list[SessionLog]:
+        """Past days (excluding today) where completion_status was never set."""
+        result = await self.session.execute(
+            select(SessionLog).where(
+                SessionLog.user_id == user_id,
+                SessionLog.completion_status.is_(None),
+                SessionLog.date < date.today(),
+            ).order_by(SessionLog.day_index.desc())
+        )
+        return list(result.scalars().all())
+
     async def delete_today(self, user_id: int) -> None:
         """Delete today's session log (used on progress reset)."""
         from sqlalchemy import delete
