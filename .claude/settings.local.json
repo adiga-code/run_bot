@@ -40,7 +40,10 @@
       "Bash(ls -lh \"C:\\\\Users\\\\Hezh PC\\\\Downloads/Готовый вариант MVP трен Дамир \\(4\\).docx\")",
       "Bash(pandoc \"C:\\\\Users\\\\Hezh PC\\\\Downloads\\\\Готовый вариант MVP трен Дамир \\(4\\).docx\" -t plain)",
       "Bash(python3 -c \"print\\(''hello''\\)\")",
-      "Bash(python -c \"import zipfile; print\\(''ok''\\)\")"
+      "Bash(python -c \"import zipfile; print\\(''ok''\\)\")",
+      "Read(//c/Users/Hezh PC/Downloads/**)",
+      "Bash(pandoc 'Готовый вариант MVP трен Дамир \\(4\\).docx' -t plain)",
+      "Bash(pandoc 'C:/Users/Hezh PC/Downloads/Готовый вариант MVP трен Дамир \\(4\\).docx' -t plain)"
     ]
   }
 }

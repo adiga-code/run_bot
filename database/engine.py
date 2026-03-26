@@ -39,7 +39,7 @@ async def _migrate_db() -> None:
 
 
 async def seed_workouts() -> None:
-    """Load workouts from data/workouts.json into DB (skip if already loaded)."""
+    """Load workouts from data/workouts.json into DB (upsert on every restart)."""
     data_path = Path(__file__).parent.parent / "data" / "workouts.json"
     if not data_path.exists():
         return
@@ -47,14 +47,24 @@ async def seed_workouts() -> None:
     from database.models import Workout
     from sqlalchemy import select
 
+    with open(data_path, encoding="utf-8") as f:
+        workouts_data = json.load(f)
+
     async with session_maker() as session:
-        result = await session.execute(select(Workout).limit(1))
-        if result.scalar_one_or_none() is not None:
-            return  # already seeded
-
-        with open(data_path, encoding="utf-8") as f:
-            workouts_data = json.load(f)
-
         for item in workouts_data:
-            session.add(Workout(**item))
+            result = await session.execute(
+                select(Workout).where(
+                    Workout.level == item["level"],
+                    Workout.day == item["day"],
+                    Workout.version == item["version"],
+                    Workout.strength_format == item.get("strength_format"),
+                )
+            )
+            existing = result.scalar_one_or_none()
+            if existing is None:
+                session.add(Workout(**item))
+            else:
+                existing.title = item["title"]
+                existing.text = item["text"]
+                existing.day_type = item.get("day_type", existing.day_type)
         await session.commit()

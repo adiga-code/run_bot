@@ -5,7 +5,7 @@ from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from handlers.utils import safe_answer
-from keyboards.builders import kb_completion, kb_effort, kb_had_pain, kb_main_menu
+from keyboards.builders import kb_completion, kb_effort, kb_had_pain, kb_main_menu, kb_completion_strength
 from services.session_log_service import SessionLogService
 
 router = Router()
@@ -31,6 +31,34 @@ BASIC_WORKOUT_TEXT = (
     "- Планка — 3×30 сек\n"
     "- Скручивания — 3×15"
 )
+
+
+@router.callback_query(F.data == "wk:mark")
+async def cb_mark_workout(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    """Evening 'mark workout' button — show completion status picker."""
+    log_svc = SessionLogService(session)
+    log = await log_svc.get_today(callback.from_user.id)
+
+    if not log:
+        await safe_answer(callback, text="Не нашёл тренировку на сегодня.", show_alert=True)
+        return
+
+    if log.completion_status:
+        await safe_answer(callback, text="Тренировка уже отмечена ✅", show_alert=True)
+        return
+
+    await callback.message.edit_reply_markup()
+    await safe_answer(callback)
+    await state.set_state(WorkoutStates.completion)
+
+    is_strength = (
+        log.assigned_version not in (None, "recovery")
+        and log.assigned_workout_id is not None
+    )
+    await callback.message.answer(
+        "Как прошла тренировка?",
+        reply_markup=kb_completion_strength() if is_strength else kb_completion(),
+    )
 
 
 @router.callback_query(F.data == "wk:custom")
