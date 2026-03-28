@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from engine.red_flags import CheckinData, detect_red_flag
-from engine.fatigue import RecentLogData, detect_cumulative_fatigue, detect_severe_fatigue
+from engine.fatigue import RecentLogData, detect_cumulative_fatigue, detect_severe_fatigue, detect_persistent_pain
 
 
 @dataclass
@@ -141,28 +141,46 @@ def decide_workout_version(
 
     fatigue_reduction = False
 
+    # If today's check-in is clearly good (wellbeing normal+, no pain), the athlete
+    # has recovered — skip historical fatigue overrides so the system doesn't get
+    # "stuck" in Recovery/Light after the person normalises.
+    today_is_good = checkin.wellbeing >= 3 and checkin.pain_level == 1
+
     if version != "recovery":
-        if detect_severe_fatigue(recent_logs):
-            # 3 tough days in a row → forced recovery
+        # Persistent pain (2+ days) is a safety override → always Recovery.
+        # We still apply this even on a "good" day because pain may be masked
+        # by rest — the athlete needs at least one more pain-free day before
+        # returning to full load.
+        if detect_persistent_pain(recent_logs):
             version = "recovery"
-            reason = "3 тяжёлых дня подряд — принудительное восстановление"
+            reason = "боль 2+ дня подряд — защитный режим восстановления"
             fatigue_reduction = True
-        elif detect_cumulative_fatigue(recent_logs):
-            # 2 tough days → light minimum
-            if version == "base":
-                version = "light"
-                reason = "накопленная усталость (2+ тяжёлых дня) — снижение нагрузки"
+        elif not today_is_good:
+            # Historical fatigue overrides only apply when today also shows
+            # some signs of fatigue. If today is fine, trust today's state.
+            if detect_severe_fatigue(recent_logs):
+                version = "recovery"
+                reason = "3 тяжёлых дня подряд — принудительное восстановление"
                 fatigue_reduction = True
+            elif detect_cumulative_fatigue(recent_logs):
+                if version == "base":
+                    version = "light"
+                    reason = "накопленная усталость (2+ тяжёлых дня) — снижение нагрузки"
+                    fatigue_reduction = True
 
     # ── After-strength cap ────────────────────────────────────────────────────
+    # Applies only when there is at least some fatigue signal (score > 0).
+    # If the athlete feels great (score == 0, no fatigue), we trust that and
+    # keep Base even after a strength day.
 
     if (
         version == "base"
         and prev_day_type == "strength"
         and not fatigue_reduction
+        and score > 0
     ):
         version = "light"
-        reason = "день после силовой — нагрузка ограничена до light"
+        reason = "день после силовой + есть признаки усталости — нагрузка ограничена до light"
 
     return WorkoutDecision(
         version=version,

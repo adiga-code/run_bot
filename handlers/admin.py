@@ -390,6 +390,11 @@ async def cb_admin_mode_set(callback: CallbackQuery, session: AsyncSession) -> N
     from datetime import date as date_cls
     from sqlalchemy import select
     from database.models import SessionLog
+    from services.session_log_service import SessionLogService
+    from services.workout_service import WorkoutService
+    from handlers.utils import filter_strength_text
+    from handlers.checkin import _get_tip_lines
+    from keyboards.builders import kb_completion, kb_completion_strength
 
     result = await session.execute(
         select(SessionLog).where(
@@ -408,16 +413,42 @@ async def cb_admin_mode_set(callback: CallbackQuery, session: AsyncSession) -> N
     version_names = {"base": "Base (полная)", "light": "Light (лёгкая)", "recovery": "Recovery (восстановление)"}
     await callback.message.answer(f"✅ Режим изменён на <b>{version_names[version]}</b>.", parse_mode="HTML")
 
+    # Fetch the actual workout for the new version and send it to the user
     try:
+        user_svc = UserService(session)
+        wk_svc = WorkoutService(session)
+
+        user = await user_svc.get_or_raise(user_id)
+        day_index = log.day_index
+        day_type = await wk_svc.get_day_type(user.level, day_index) or "run"
+        workout = await wk_svc.get(
+            user.level, day_index, version,
+            strength_format=user.strength_format if day_type == "strength" else None,
+        )
+
         await callback.bot.send_message(
             chat_id=user_id,
             text=f"🔄 Тренер скорректировал твою тренировку на сегодня.\n\n"
-                 f"Новый режим: <b>{version_names[version]}</b>\n\n"
-                 f"Нажми «Сегодняшняя тренировка» чтобы увидеть обновлённый план.",
+                 f"Новый режим: <b>{version_names[version]}</b>",
             parse_mode="HTML",
         )
+
+        if workout:
+            workout_text = filter_strength_text(
+                workout.text,
+                user.strength_format if day_type == "strength" else None,
+            )
+            is_strength = day_type == "strength" and version != "recovery"
+            tips = _get_tip_lines(user.level, day_index)
+            tips_block = f"\n\n{tips}" if tips else ""
+            await callback.bot.send_message(
+                chat_id=user_id,
+                text=f"📋 <b>День {day_index} из 28 — {workout.title}</b>{tips_block}\n\n{workout_text}",
+                parse_mode="HTML",
+                reply_markup=kb_completion_strength() if is_strength else kb_completion(),
+            )
     except Exception:
-        pass
+        logger.exception("Failed to send updated workout to user %s after mode override", user_id)
 
 
 @router.callback_query(F.data.startswith("adm:jump:"))
