@@ -80,4 +80,8 @@ def assign_level(answers: OnboardingAnswers) -> int:
     if not answers.structure and level > 3:
         level = 3
 
+    # Someone who already runs 2+ times/week is not a beginner — floor at 2
+    if answers.runs and answers.frequency in ("2_3", "4plus") and level < 2:
+        level = 2
+
     return level
