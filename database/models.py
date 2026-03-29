@@ -112,6 +112,10 @@ class SessionLog(Base):
     evening_sent: Mapped[bool] = mapped_column(Boolean, default=False)
     checkin_done: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Manual approval flow
+    approval_pending: Mapped[bool] = mapped_column(Boolean, default=False)
+    checkin_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     user: Mapped["User"] = relationship(back_populates="session_logs")

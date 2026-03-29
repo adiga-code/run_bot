@@ -163,6 +163,23 @@ class SessionLogService:
         )
         return list(result.scalars().all())
 
+    async def pending_checkin_approvals(self, timeout_minutes: int = 60) -> list[SessionLog]:
+        """Logs awaiting admin approval that have exceeded the timeout."""
+        from datetime import datetime, timezone, timedelta
+        from sqlalchemy.orm import joinedload
+        from database.models import User
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)
+        result = await self.session.execute(
+            select(SessionLog)
+            .join(SessionLog.user)
+            .options(joinedload(SessionLog.user))
+            .where(
+                SessionLog.approval_pending == True,
+                SessionLog.checkin_at <= cutoff,
+            )
+        )
+        return list(result.scalars().all())
+
     async def pending_morning_reminder(self, utc_hour: int) -> list[SessionLog]:
         from sqlalchemy.orm import joinedload
         from database.models import User

@@ -147,13 +147,12 @@ def decide_workout_version(
     today_is_good = checkin.wellbeing >= 3 and checkin.pain_level == 1
 
     if version != "recovery":
-        # Persistent pain (2+ days) is a safety override → always Recovery.
-        # We still apply this even on a "good" day because pain may be masked
-        # by rest — the athlete needs at least one more pain-free day before
-        # returning to full load.
-        if detect_persistent_pain(recent_logs):
-            version = "recovery"
-            reason = "боль 2+ дня подряд — защитный режим восстановления"
+        # Persistent pain (2+ days): pull Base down to Light as a safety measure.
+        # Never escalates Light → Recovery — "немного боли" alone is not enough
+        # for recovery; only acute pain (level 3) or very bad wellbeing triggers that.
+        if detect_persistent_pain(recent_logs) and version == "base":
+            version = "light"
+            reason = "боль 2+ дня подряд — снижение нагрузки до light"
             fatigue_reduction = True
         elif not today_is_good:
             # Historical fatigue overrides only apply when today also shows

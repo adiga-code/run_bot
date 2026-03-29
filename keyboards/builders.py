@@ -272,6 +272,17 @@ def kb_admin_mark_day_status(user_id: int, day_index: int) -> InlineKeyboardMark
     return builder.as_markup()
 
 
+def kb_checkin_approve(user_id: int) -> InlineKeyboardMarkup:
+    """Sent to admin after user completes check-in — choose workout version."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💪 Base",     callback_data=f"adm:ca:{user_id}:base")
+    builder.button(text="🔆 Light",    callback_data=f"adm:ca:{user_id}:light")
+    builder.button(text="🔄 Recovery", callback_data=f"adm:ca:{user_id}:recovery")
+    builder.button(text="😴 Отдых",    callback_data=f"adm:ca:{user_id}:rest")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
 def kb_admin_day_mode(user_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="💪 Base (полная)", callback_data=f"adm:mode:set:{user_id}:base")

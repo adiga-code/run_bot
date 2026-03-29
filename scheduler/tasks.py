@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 
 from aiogram import Bot
@@ -8,6 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from keyboards.builders import kb_main_menu, kb_mark_workout
 from services.session_log_service import SessionLogService
 from services.user_service import UserService
+from services.workout_service import WorkoutService
+
+logger = logging.getLogger(__name__)
 
 
 async def _create_daily_logs(session_maker: async_sessionmaker[AsyncSession]) -> None:
@@ -129,6 +133,49 @@ async def _send_evening_reminders(bot: Bot, session_maker: async_sessionmaker[As
                 pass
 
 
+async def _auto_approve_checkins(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> None:
+    """
+    Run every minute. Auto-sends the bot's recommended workout to users whose
+    check-in has been pending admin approval for more than 60 minutes.
+    """
+    async with session_maker() as session:
+        from handlers.utils import send_workout_to_user
+        log_svc = SessionLogService(session)
+        wk_svc = WorkoutService(session)
+
+        logs = await log_svc.pending_checkin_approvals(timeout_minutes=60)
+        for log in logs:
+            try:
+                user = log.user
+                version = log.assigned_version or "light"
+                day_type = await wk_svc.get_day_type(user.level, log.day_index) or "run"
+
+                if version == "rest":
+                    await bot.send_message(
+                        chat_id=log.user_id,
+                        text="😴 Сегодня день отдыха. Позволь телу восстановиться.",
+                        reply_markup=kb_main_menu(),
+                    )
+                else:
+                    workout = await wk_svc.get(
+                        user.level, log.day_index, version,
+                        strength_format=user.strength_format if day_type == "strength" else None,
+                    )
+                    if workout:
+                        await send_workout_to_user(
+                            bot, log.user_id, log.day_index,
+                            workout, day_type, version, user.strength_format, user.level,
+                        )
+
+                await log_svc.update(log, approval_pending=False)
+                logger.info(
+                    "Auto-approved checkin for user %s → %s (timeout)",
+                    log.user_id, version,
+                )
+            except Exception:
+                logger.exception("Failed to auto-approve checkin for user %s", log.user_id)
+
+
 def setup_scheduler(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone="UTC")
 
@@ -147,6 +194,15 @@ def setup_scheduler(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -
         CronTrigger(minute="*"),
         args=[bot, session_maker],
         id="evening_reminders",
+        replace_existing=True,
+    )
+
+    # Every minute: auto-send workout if admin hasn't approved in 60 min
+    scheduler.add_job(
+        _auto_approve_checkins,
+        CronTrigger(minute="*"),
+        args=[bot, session_maker],
+        id="auto_approve_checkins",
         replace_existing=True,
     )
 

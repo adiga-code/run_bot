@@ -1,9 +1,55 @@
+import json
 import logging
+import os
 
+from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 
 logger = logging.getLogger(__name__)
+
+_TIPS_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "day_tips.json")
+with open(_TIPS_PATH, encoding="utf-8") as _f:
+    _DAY_TIPS: dict = json.load(_f)
+
+
+def get_tip_lines(level: int, day: int) -> str:
+    tip = _DAY_TIPS.get(str(level), {}).get(str(day), {})
+    motivation = tip.get("motivation", "")
+    hint = tip.get("tip", "")
+    parts = []
+    if motivation:
+        parts.append(f"💬 <i>{motivation}</i>")
+    if hint:
+        parts.append(f"🤍 <i>{hint}</i>")
+    return "\n".join(parts)
+
+
+async def send_workout_to_user(
+    bot: Bot,
+    user_id: int,
+    day_index: int,
+    workout,
+    day_type: str,
+    version: str,
+    strength_format: str | None,
+    level: int,
+) -> None:
+    """Send the final workout message to the user."""
+    from keyboards.builders import kb_completion, kb_completion_strength
+    workout_text = filter_strength_text(
+        workout.text,
+        strength_format if day_type == "strength" else None,
+    )
+    is_strength = day_type == "strength" and version != "recovery"
+    tips = get_tip_lines(level, day_index)
+    tips_block = f"\n\n{tips}" if tips else ""
+    await bot.send_message(
+        chat_id=user_id,
+        text=f"📋 <b>День {day_index} из 28 — {workout.title}</b>{tips_block}\n\n{workout_text}",
+        parse_mode="HTML",
+        reply_markup=kb_completion_strength() if is_strength else kb_completion(),
+    )
 
 
 async def safe_answer(callback: CallbackQuery, text: str = "", show_alert: bool = False) -> None:

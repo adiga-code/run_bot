@@ -376,6 +376,73 @@ async def cb_admin_mode_picker(callback: CallbackQuery) -> None:
     )
 
 
+@router.callback_query(F.data.startswith("adm:ca:"))
+async def cb_checkin_approve(callback: CallbackQuery, session: AsyncSession) -> None:
+    """Admin approves (or overrides) a pending check-in and sends workout to user."""
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+
+    parts = callback.data.split(":")
+    # adm:ca:<user_id>:<version>
+    user_id, version = int(parts[2]), parts[3]
+    await safe_answer(callback)
+
+    from datetime import date as date_cls
+    from sqlalchemy import select
+    from database.models import SessionLog
+    from services.session_log_service import SessionLogService
+    from services.workout_service import WorkoutService
+    from handlers.utils import send_workout_to_user
+
+    result = await session.execute(
+        select(SessionLog).where(
+            SessionLog.user_id == user_id,
+            SessionLog.date == date_cls.today(),
+        )
+    )
+    log = result.scalar_one_or_none()
+    if not log:
+        await callback.message.answer("Лог на сегодня не найден.")
+        return
+
+    if not log.approval_pending:
+        await callback.message.answer("Тренировка уже была отправлена этому пользователю.")
+        return
+
+    log_svc = SessionLogService(session)
+    wk_svc = WorkoutService(session)
+    user_svc = UserService(session)
+    user = await user_svc.get_or_raise(user_id)
+
+    day_type = await wk_svc.get_day_type(user.level, log.day_index) or "run"
+
+    if version == "rest":
+        await log_svc.update(log, assigned_version="rest", approval_pending=False)
+        await callback.bot.send_message(
+            chat_id=user_id,
+            text="😴 Сегодня день отдыха. Позволь телу восстановиться.",
+            reply_markup=kb_main_menu(),
+        )
+        version_label = "Отдых"
+    else:
+        workout = await wk_svc.get(
+            user.level, log.day_index, version,
+            strength_format=user.strength_format if day_type == "strength" else None,
+        )
+        await log_svc.update(log, assigned_version=version, approval_pending=False)
+        if workout:
+            await send_workout_to_user(
+                callback.bot, user_id, log.day_index,
+                workout, day_type, version, user.strength_format, user.level,
+            )
+        version_label = {"base": "Base", "light": "Light", "recovery": "Recovery"}.get(version, version)
+
+    logger.info("Admin %s approved checkin for user %s → %s", callback.from_user.id, user_id, version)
+    await callback.message.edit_reply_markup()
+    await callback.message.answer(f"✅ Отправлено: {version_label} → {user.full_name}")
+
+
 @router.callback_query(F.data.startswith("adm:mode:set:"))
 async def cb_admin_mode_set(callback: CallbackQuery, session: AsyncSession) -> None:
     if not is_admin(callback.from_user.id):

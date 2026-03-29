@@ -1,6 +1,4 @@
-import json
 import logging
-import os
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -9,36 +7,28 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import settings
 from data.interpretations import get_interpretation
 from engine.red_flags import CheckinData
 from engine.rule_engine import decide_workout_version
 from keyboards.builders import (
     kb_main_menu, kb_completion, kb_completion_strength, kb_mark_workout,
     kb_pain_checkin, kb_pain_increases_checkin, kb_sleep, kb_stress, kb_wellbeing,
-    kb_yesterday_completion,
+    kb_yesterday_completion, kb_checkin_approve,
 )
-from handlers.utils import safe_answer, filter_strength_text
+from handlers.utils import safe_answer, filter_strength_text, get_tip_lines, send_workout_to_user
 from services.session_log_service import SessionLogService
 from services.user_service import UserService
 from services.workout_service import WorkoutService
 
 logger = logging.getLogger(__name__)
 
-_TIPS_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "day_tips.json")
-with open(_TIPS_PATH, encoding="utf-8") as _f:
-    _DAY_TIPS: dict = json.load(_f)
-
-
-def _get_tip_lines(level: int, day: int) -> str:
-    tip = _DAY_TIPS.get(str(level), {}).get(str(day), {})
-    motivation = tip.get("motivation", "")
-    hint = tip.get("tip", "")
-    parts = []
-    if motivation:
-        parts.append(f"💬 <i>{motivation}</i>")
-    if hint:
-        parts.append(f"🤍 <i>{hint}</i>")
-    return "\n".join(parts)
+_WELLBEING_LABELS = {1: "плохо", 2: "тяжеловато", 3: "нормально", 4: "хорошо", 5: "отлично"}
+_SLEEP_LABELS    = {1: "плохо", 2: "нормально", 3: "хорошо"}
+_PAIN_LABELS     = {1: "нет", 2: "немного", 3: "есть"}
+_STRESS_LABELS   = {1: "нет", 2: "умеренный", 3: "сильный"}
+_VERSION_LABELS  = {"base": "Base (полная)", "light": "Light (лёгкая)", "recovery": "Recovery", "rest": "Отдых"}
+_DAY_TYPE_LABELS = {"run": "Бег", "strength": "Силовая", "recovery": "Восстановление", "rest": "Отдых"}
 
 router = Router()
 
@@ -128,7 +118,7 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
                 )
                 is_strength = workout.day_type == "strength" and log.assigned_version != "recovery"
                 already_marked = log.completion_status is not None
-                tips = _get_tip_lines(user.level, log.day_index)
+                tips = get_tip_lines(user.level, log.day_index)
                 tips_block = f"\n\n{tips}" if tips else ""
                 await callback.message.answer(
                     f"📋 <b>День {log.day_index} из 28 — {workout.title}</b>{tips_block}\n\n{workout_text}",
@@ -282,6 +272,9 @@ async def _finish_checkin(
         strength_format=user.strength_format if day_type == "strength" else None,
     )
 
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+
     log, _ = await log_svc.get_or_create_today(user_id, day_index)
     await log_svc.update(
         log,
@@ -295,14 +288,17 @@ async def _finish_checkin(
         red_flag=decision.red_flag,
         fatigue_reduction=decision.fatigue_reduction,
         checkin_done=True,
+        approval_pending=True,
+        checkin_at=now,
     )
 
     logger.info(
-        "Checkin user=%s wellbeing=%s sleep=%s pain=%s stress=%s → version=%s",
+        "Checkin user=%s wellbeing=%s sleep=%s pain=%s stress=%s → version=%s (pending approval)",
         user_id, checkin.wellbeing, checkin.sleep_quality, checkin.pain_level,
         checkin.stress_level, decision.version,
     )
 
+    # Send interpretation to user, then tell them to wait
     interpretation = get_interpretation(
         version=decision.version,
         checkin_wellbeing=checkin.wellbeing,
@@ -310,24 +306,29 @@ async def _finish_checkin(
         fatigue_reduction=decision.fatigue_reduction,
     )
     await callback.message.answer(interpretation)
+    await callback.message.answer(
+        "⏳ Тренер проверит твои данные и пришлёт тренировку в ближайшее время.",
+        reply_markup=kb_main_menu(),
+    )
 
-    if workout:
-        workout_text = filter_strength_text(workout.text, user.strength_format if day_type == "strength" else None)
-        is_strength = day_type == "strength" and decision.version != "recovery"
-        tips = _get_tip_lines(user.level, day_index)
-        tips_block = f"\n\n{tips}" if tips else ""
-        logger.info(
-            "Sent workout day=%s version=%s to user=%s",
-            day_index, decision.version, user_id,
-        )
-        await callback.message.answer(
-            f"📋 <b>День {day_index} из 28 — {workout.title}</b>{tips_block}\n\n"
-            f"{workout_text}",
-            parse_mode="HTML",
-            reply_markup=kb_completion_strength() if is_strength else kb_completion(),
-        )
-    else:
-        await callback.message.answer(
-            f"День {day_index} из 28. Тренировка загружается...",
-            reply_markup=kb_main_menu(),
-        )
+    # Build approval card for admins
+    day_type_label = _DAY_TYPE_LABELS.get(day_type, day_type)
+    card = (
+        f"👤 <b>{user.full_name}</b> — День {day_index} из 28 ({day_type_label})\n"
+        f"Самочувствие: {_WELLBEING_LABELS.get(checkin.wellbeing, '?')} | "
+        f"Сон: {_SLEEP_LABELS.get(checkin.sleep_quality, '?')} | "
+        f"Боль: {_PAIN_LABELS.get(checkin.pain_level, '?')} | "
+        f"Стресс: {_STRESS_LABELS.get(checkin.stress_level, '?')}\n\n"
+        f"🤖 Рекомендация: <b>{_VERSION_LABELS.get(decision.version, decision.version)}</b>\n"
+        f"📝 {decision.reason}"
+    )
+    for admin_id in settings.admin_ids:
+        try:
+            await callback.bot.send_message(
+                chat_id=admin_id,
+                text=card,
+                parse_mode="HTML",
+                reply_markup=kb_checkin_approve(user_id),
+            )
+        except Exception:
+            logger.warning("Could not send approval card to admin %s", admin_id)
