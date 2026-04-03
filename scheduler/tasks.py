@@ -59,21 +59,33 @@ async def _send_morning_reminders(bot: Bot, session_maker: async_sessionmaker[As
 async def _check_week_completion(session_maker: async_sessionmaker[AsyncSession]) -> None:
     """
     Run at 23:55 UTC every day.
-    For users on day 7, 14, 21, or 28 (end of a week), check weekly completion rate.
-    If < 75%, increment week_repeat_count so next day's index stays in the same week.
+    For users whose calendar day is 7, 14, 21, or 28 (end of a real week),
+    check weekly completion rate based on calendar dates.
+    If < 75%, increment week_repeat_count so the next workout template
+    repeats the same week — without moving the calendar day back.
     """
+    from datetime import timedelta
     async with session_maker() as session:
         user_svc = UserService(session)
         log_svc = SessionLogService(session)
         users = await user_svc.all_active()
         for user in users:
-            day = await user_svc.current_program_day(user)
-            if day is None or day % 7 != 0:
+            calendar_day = await user_svc.current_calendar_day(user)
+            if calendar_day is None or calendar_day % 7 != 0:
                 continue  # not end-of-week today
-            week_start, week_end = user_svc.current_week_range(day)
-            rate = await log_svc.week_completion_rate(user.telegram_id, week_start, week_end)
+
+            # Date range for this calendar week
+            week_end_date = user.program_start_date + timedelta(days=calendar_day - 1)
+            week_start_date = week_end_date - timedelta(days=6)
+            rate = await log_svc.week_completion_rate_by_dates(
+                user.telegram_id, week_start_date, week_end_date
+            )
             if rate < 0.75:
                 await user_svc.update(user, week_repeat_count=user.week_repeat_count + 1)
+                logger.info(
+                    "User %s week completion %.0f%% < 75%% — repeating load week (repeat_count=%d)",
+                    user.telegram_id, rate * 100, user.week_repeat_count,
+                )
 
 
 async def _send_evening_reminders(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> None:
@@ -142,6 +154,7 @@ async def _auto_approve_checkins(bot: Bot, session_maker: async_sessionmaker[Asy
         from handlers.utils import send_workout_to_user
         log_svc = SessionLogService(session)
         wk_svc = WorkoutService(session)
+        user_svc = UserService(session)
 
         logs = await log_svc.pending_checkin_approvals(timeout_minutes=60)
         for log in logs:
@@ -165,6 +178,7 @@ async def _auto_approve_checkins(bot: Bot, session_maker: async_sessionmaker[Asy
                         await send_workout_to_user(
                             bot, log.user_id, log.day_index,
                             workout, day_type, version, user.strength_format, user.level,
+                            calendar_day=user_svc.log_calendar_day(user, log),
                         )
 
                 await log_svc.update(log, approval_pending=False)

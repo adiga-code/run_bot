@@ -109,6 +109,15 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
     if log and log.checkin_done:
         await callback.message.edit_reply_markup()
         await safe_answer(callback)
+
+        # Waiting for trainer approval — don't show workout yet
+        if log.approval_pending:
+            await callback.message.answer(
+                "⏳ Тренер проверяет твои данные и скоро пришлёт тренировку.",
+                reply_markup=kb_main_menu(),
+            )
+            return
+
         if log.assigned_workout_id:
             workout = await wk_svc.get_by_id(log.assigned_workout_id)
             if workout:
@@ -118,10 +127,11 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
                 )
                 is_strength = workout.day_type == "strength" and log.assigned_version != "recovery"
                 already_marked = log.completion_status is not None
-                tips = get_tip_lines(user.level, log.day_index)
+                calendar_day = user_svc.log_calendar_day(user, log)
+                tips = get_tip_lines(user.level, log.day_index)  # template day for tips
                 tips_block = f"\n\n{tips}" if tips else ""
                 await callback.message.answer(
-                    f"📋 <b>День {log.day_index} из 28 — {workout.title}</b>{tips_block}\n\n{workout_text}",
+                    f"📋 <b>День {calendar_day} из 28 — {workout.title}</b>{tips_block}\n\n{workout_text}",
                     parse_mode="HTML",
                     reply_markup=(
                         kb_main_menu() if already_marked
@@ -260,22 +270,24 @@ async def _finish_checkin(
     wk_svc = WorkoutService(session)
 
     user = await user_svc.get_or_raise(user_id)
-    day_index = await user_svc.current_program_day(user) or 1
+    calendar_day = await user_svc.current_calendar_day(user) or 1
+    template_day = await user_svc.current_template_day(user) or 1
     recent_logs = await log_svc.get_recent(user_id)
-    day_type = await wk_svc.get_day_type(user.level, day_index) or "run"
+    day_type = await wk_svc.get_day_type(user.level, template_day) or "run"
 
-    prev_day_type = await wk_svc.get_day_type(user.level, max(1, day_index - 1))
+    prev_day_type = await wk_svc.get_day_type(user.level, max(1, template_day - 1))
 
     decision = decide_workout_version(checkin, recent_logs, day_type, prev_day_type)
     workout = await wk_svc.get(
-        user.level, day_index, decision.version,
+        user.level, template_day, decision.version,
         strength_format=user.strength_format if day_type == "strength" else None,
     )
 
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
 
-    log, _ = await log_svc.get_or_create_today(user_id, day_index)
+    # Log stores template_day for workout lookups; calendar_day is derived from log.date.
+    log, _ = await log_svc.get_or_create_today(user_id, template_day)
     await log_svc.update(
         log,
         wellbeing=checkin.wellbeing,
@@ -293,9 +305,9 @@ async def _finish_checkin(
     )
 
     logger.info(
-        "Checkin user=%s wellbeing=%s sleep=%s pain=%s stress=%s → version=%s (pending approval)",
-        user_id, checkin.wellbeing, checkin.sleep_quality, checkin.pain_level,
-        checkin.stress_level, decision.version,
+        "Checkin user=%s calendar_day=%s template_day=%s wellbeing=%s sleep=%s pain=%s stress=%s → version=%s (pending approval)",
+        user_id, calendar_day, template_day, checkin.wellbeing, checkin.sleep_quality,
+        checkin.pain_level, checkin.stress_level, decision.version,
     )
 
     # Send interpretation to user, then tell them to wait
@@ -311,10 +323,10 @@ async def _finish_checkin(
         reply_markup=kb_main_menu(),
     )
 
-    # Build approval card for admins
+    # Build approval card for admins — show calendar_day so admin sees real progress
     day_type_label = _DAY_TYPE_LABELS.get(day_type, day_type)
     card = (
-        f"👤 <b>{user.full_name}</b> — День {day_index} из 28 ({day_type_label})\n"
+        f"👤 <b>{user.full_name}</b> — День {calendar_day} из 28 ({day_type_label})\n"
         f"Самочувствие: {_WELLBEING_LABELS.get(checkin.wellbeing, '?')} | "
         f"Сон: {_SLEEP_LABELS.get(checkin.sleep_quality, '?')} | "
         f"Боль: {_PAIN_LABELS.get(checkin.pain_level, '?')} | "

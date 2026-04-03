@@ -43,7 +43,13 @@
       "Bash(python -c \"import zipfile; print\\(''ok''\\)\")",
       "Read(//c/Users/Hezh PC/Downloads/**)",
       "Bash(pandoc 'Готовый вариант MVP трен Дамир \\(4\\).docx' -t plain)",
-      "Bash(pandoc 'C:/Users/Hezh PC/Downloads/Готовый вариант MVP трен Дамир \\(4\\).docx' -t plain)"
+      "Bash(pandoc 'C:/Users/Hezh PC/Downloads/Готовый вариант MVP трен Дамир \\(4\\).docx' -t plain)",
+      "Bash(pandoc \"C:/Users/Hezh PC/Downloads/Тренировки для бот.docx\" -o /tmp/workout_output.md --track-changes=all)",
+      "Bash(SKILL_DIR=\"/c/Users/Hezh PC/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/539a9c52-7fe4-4771-918f-71f2bb0d34f7/a086cb6a-712d-44dd-b0fb-75108f738614/skills/docx\")",
+      "Bash(python \"$SKILL_DIR/scripts/office/unpack.py\" \"/c/Users/Hezh PC/Downloads/Тренировки для бот.docx\" /tmp/workout_unpacked/)",
+      "Bash(find /tmp -name *.xml)",
+      "Bash(DOCXML=\"C:/Users/Hezh PC/AppData/Local/Temp/workout_unpacked/word/document.xml\")",
+      "Bash(cd /c/Users/Hezh PC/Desktop/projects/фриланс_19_03/data)"
     ]
   }
 }

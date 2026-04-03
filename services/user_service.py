@@ -49,16 +49,44 @@ class UserService:
         await self.session.refresh(user)
         return user
 
-    async def current_program_day(self, user: User) -> int | None:
+    async def current_calendar_day(self, user: User) -> int | None:
         """
-        Returns today's day index (1-28) or None if program not started.
-        week_repeat_count shifts the effective day back by 7 per repeat.
+        Returns the user's real calendar day in the program (1-28).
+        Never decreases — always delta+1 regardless of week repeats.
+        Shown in UI as "День X из 28".
+        """
+        if not user.program_start_date:
+            return None
+        delta = (date.today() - user.program_start_date).days
+        return max(1, min(28, delta + 1))
+
+    async def current_template_day(self, user: User) -> int | None:
+        """
+        Returns the training-template day (1-28) used for workout lookup.
+        Subtracts 7 per week_repeat_count so the user re-runs the same
+        workout week when they underperformed.
         """
         if not user.program_start_date:
             return None
         delta = (date.today() - user.program_start_date).days
         day_index = delta + 1 - (user.week_repeat_count * 7)
         return max(1, min(28, day_index))
+
+    # Keep legacy name as alias for template day — used in log creation and
+    # workout lookups. Do NOT use for display; use current_calendar_day instead.
+    async def current_program_day(self, user: User) -> int | None:
+        return await self.current_template_day(user)
+
+    def log_calendar_day(self, user: User, log) -> int:
+        """
+        Compute the calendar day for a historical log entry.
+        Uses the log's actual date so it is always correct regardless of
+        when week_repeat_count was changed.
+        """
+        if not user.program_start_date:
+            return log.day_index
+        delta = (log.date - user.program_start_date).days
+        return max(1, min(28, delta + 1))
 
     def current_week_range(self, day_index: int) -> tuple[int, int]:
         """Returns (week_start_day, week_end_day) for the given day_index."""

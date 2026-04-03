@@ -163,6 +163,34 @@ class SessionLogService:
         )
         return list(result.scalars().all())
 
+    async def week_completion_rate_by_dates(
+        self, user_id: int, start_date, end_date
+    ) -> float:
+        """
+        Completion rate for a calendar date range.
+        Used by _check_week_completion so repeated weeks don't double-count
+        old logs with the same template day_index values.
+        done=1.0, partial=0.5, everything else=0.0
+        """
+        result = await self.session.execute(
+            select(SessionLog).where(
+                SessionLog.user_id == user_id,
+                SessionLog.date >= start_date,
+                SessionLog.date <= end_date,
+                SessionLog.checkin_done == True,
+            )
+        )
+        logs = list(result.scalars().all())
+        if not logs:
+            return 0.0
+        score = sum(
+            1.0 if l.completion_status == "done" else 0.5 if l.completion_status == "partial" else 0.0
+            for l in logs
+        )
+        # Denominator = calendar days in the window (7 normally)
+        total_days = (end_date - start_date).days + 1
+        return score / total_days
+
     async def pending_checkin_approvals(self, timeout_minutes: int = 60) -> list[SessionLog]:
         """Logs awaiting admin approval that have exceeded the timeout."""
         from datetime import datetime, timezone, timedelta

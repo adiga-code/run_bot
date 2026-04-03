@@ -281,14 +281,14 @@ async def _send_report(message, session: AsyncSession, user_id: int, as_file: bo
     DAY_TYPE = {"run": "Бег", "strength": "Силовая", "recovery": "Восстановление", "rest": "Отдых"}
 
     level_name = LEVEL_NAMES.get(user.level, "?")
-    current_day = await user_svc.current_program_day(user) or "?"
+    current_day = await user_svc.current_calendar_day(user) or "?"
 
     if as_file:
         buf = io.StringIO()
         buf.write("День,Дата,Тип,Режим,Самочувствие,Сон,Боль,Статус\n")
         for log, workout in rows:
             buf.write(",".join([
-                str(log.day_index),
+                str(user_svc.log_calendar_day(user, log)),
                 str(log.date),
                 DAY_TYPE.get(workout.day_type, "—") if workout else "—",
                 VERSION.get(log.assigned_version, "—") if log.assigned_version else "—",
@@ -323,7 +323,8 @@ async def _send_report(message, session: AsyncSession, user_id: int, as_file: bo
         day_type = DAY_TYPE.get(workout.day_type, "—") if workout else "—"
         version = VERSION.get(log.assigned_version, "—") if log.assigned_version else "—"
         status = STATUS.get(log.completion_status, "—") if log.completion_status else "—"
-        lines.append(f"День {log.day_index:>2} | {day_type:<14} | {version:<8} | {status}")
+        cal_day = user_svc.log_calendar_day(user, log)
+        lines.append(f"День {cal_day:>2} | {day_type:<14} | {version:<8} | {status}")
 
     text = "\n".join(lines)
     # Split if too long
@@ -352,7 +353,7 @@ async def cb_admin_manage(callback: CallbackQuery, session: AsyncSession) -> Non
         await callback.message.answer("Пользователь не найден.")
         return
 
-    current_day = await user_svc.current_program_day(user) or "?"
+    current_day = await user_svc.current_calendar_day(user) or "?"
     level_name = LEVEL_NAMES.get(user.level, "?")
     await callback.message.answer(
         f"⚙️ <b>{user.full_name}</b>\n"
@@ -435,6 +436,7 @@ async def cb_checkin_approve(callback: CallbackQuery, session: AsyncSession) -> 
             await send_workout_to_user(
                 callback.bot, user_id, log.day_index,
                 workout, day_type, version, user.strength_format, user.level,
+                calendar_day=user_svc.log_calendar_day(user, log),
             )
         version_label = {"base": "Base", "light": "Light", "recovery": "Recovery"}.get(version, version)
 
@@ -459,8 +461,7 @@ async def cb_admin_mode_set(callback: CallbackQuery, session: AsyncSession) -> N
     from database.models import SessionLog
     from services.session_log_service import SessionLogService
     from services.workout_service import WorkoutService
-    from handlers.utils import filter_strength_text
-    from handlers.checkin import _get_tip_lines
+    from handlers.utils import filter_strength_text, get_tip_lines
     from keyboards.builders import kb_completion, kb_completion_strength
 
     result = await session.execute(
@@ -506,11 +507,12 @@ async def cb_admin_mode_set(callback: CallbackQuery, session: AsyncSession) -> N
                 user.strength_format if day_type == "strength" else None,
             )
             is_strength = day_type == "strength" and version != "recovery"
-            tips = _get_tip_lines(user.level, day_index)
+            tips = get_tip_lines(user.level, day_index)
             tips_block = f"\n\n{tips}" if tips else ""
+            calendar_day = user_svc.log_calendar_day(user, log)
             await callback.bot.send_message(
                 chat_id=user_id,
-                text=f"📋 <b>День {day_index} из 28 — {workout.title}</b>{tips_block}\n\n{workout_text}",
+                text=f"📋 <b>День {calendar_day} из 28 — {workout.title}</b>{tips_block}\n\n{workout_text}",
                 parse_mode="HTML",
                 reply_markup=kb_completion_strength() if is_strength else kb_completion(),
             )
