@@ -127,6 +127,10 @@ def decide_workout_version(
 
     score, _ = _score_from_checkin(checkin)
 
+    # today_is_good: wellbeing is at least normal AND no pain today.
+    # When true: cap score-based recovery at light, and skip historical overrides.
+    today_is_good = checkin.wellbeing >= 3 and checkin.pain_level == 1
+
     if score <= 1:
         version = "base"
         reason = "хорошее самочувствие"
@@ -134,17 +138,18 @@ def decide_workout_version(
         version = "light"
         reason = f"умеренная нагрузка (score={score})"
     else:
-        version = "recovery"
-        reason = f"высокий балл усталости (score={score})"
+        if today_is_good:
+            # Athlete feels ok today — bad sleep or stress alone doesn't justify full recovery.
+            # Cap at light so the system doesn't over-react to a single bad metric.
+            version = "light"
+            reason = f"сон/стресс снизили нагрузку, но самочувствие нормальное (score={score})"
+        else:
+            version = "recovery"
+            reason = f"высокий балл усталости (score={score})"
 
     # ── Cumulative fatigue check ───────────────────────────────────────────────
 
     fatigue_reduction = False
-
-    # If today's check-in is clearly good (wellbeing normal+, no pain), the athlete
-    # has recovered — skip historical fatigue overrides so the system doesn't get
-    # "stuck" in Recovery/Light after the person normalises.
-    today_is_good = checkin.wellbeing >= 3 and checkin.pain_level == 1
 
     if version != "recovery":
         # Persistent pain (2+ days): pull Base down to Light as a safety measure.

@@ -286,6 +286,9 @@ async def _finish_checkin(
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
 
+    # Admins doing their own check-in bypass the approval flow — no trainer needed.
+    user_is_admin = user_id in settings.admin_ids
+
     # Log stores template_day for workout lookups; calendar_day is derived from log.date.
     log, _ = await log_svc.get_or_create_today(user_id, template_day)
     await log_svc.update(
@@ -300,17 +303,18 @@ async def _finish_checkin(
         red_flag=decision.red_flag,
         fatigue_reduction=decision.fatigue_reduction,
         checkin_done=True,
-        approval_pending=True,
+        approval_pending=not user_is_admin,
         checkin_at=now,
     )
 
     logger.info(
-        "Checkin user=%s calendar_day=%s template_day=%s wellbeing=%s sleep=%s pain=%s stress=%s → version=%s (pending approval)",
+        "Checkin user=%s calendar_day=%s template_day=%s wellbeing=%s sleep=%s pain=%s stress=%s → version=%s (%s)",
         user_id, calendar_day, template_day, checkin.wellbeing, checkin.sleep_quality,
         checkin.pain_level, checkin.stress_level, decision.version,
+        "admin-direct" if user_is_admin else "pending approval",
     )
 
-    # Send interpretation to user, then tell them to wait
+    # Send interpretation to user
     interpretation = get_interpretation(
         version=decision.version,
         checkin_wellbeing=checkin.wellbeing,
@@ -318,12 +322,27 @@ async def _finish_checkin(
         fatigue_reduction=decision.fatigue_reduction,
     )
     await callback.message.answer(interpretation)
+
+    if user_is_admin:
+        # Send workout directly — no approval card needed
+        if decision.version == "rest" or workout is None:
+            await callback.message.answer(
+                "😴 Сегодня день отдыха.", reply_markup=kb_main_menu()
+            )
+        else:
+            await send_workout_to_user(
+                callback.bot, user_id, template_day,
+                workout, day_type, decision.version, user.strength_format, user.level,
+                calendar_day=calendar_day,
+            )
+        return
+
     await callback.message.answer(
         "⏳ Тренер проверит твои данные и пришлёт тренировку в ближайшее время.",
         reply_markup=kb_main_menu(),
     )
 
-    # Build approval card for admins — show calendar_day so admin sees real progress
+    # Build approval card for non-admin athletes
     day_type_label = _DAY_TYPE_LABELS.get(day_type, day_type)
     card = (
         f"👤 <b>{user.full_name}</b> — День {calendar_day} из 28 ({day_type_label})\n"
