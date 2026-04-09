@@ -34,15 +34,31 @@ class User(Base):
     evening_reminder_hour: Mapped[int] = mapped_column(Integer, default=20)
     reminders_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Profile (Блок 1)
+    last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    middle_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    gender: Mapped[str | None] = mapped_column(String(10), nullable=True)        # m / f
+
     # Onboarding answers (raw values, stored for reference)
-    q_runs: Mapped[str | None] = mapped_column(String(10), nullable=True)        # yes / no
+    q_goal: Mapped[str | None] = mapped_column(String(50), nullable=True)        # Блок 2
+    q_runs: Mapped[str | None] = mapped_column(String(20), nullable=True)        # no/irregular/regular
     q_frequency: Mapped[str | None] = mapped_column(String(20), nullable=True)
     q_volume: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    q_longest_run: Mapped[str | None] = mapped_column(String(20), nullable=True) # Блок 3
     q_structure: Mapped[str | None] = mapped_column(String(10), nullable=True)   # yes / no
-    q_regularity: Mapped[str | None] = mapped_column(String(20), nullable=True)  # kept for legacy
-    q_break: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    q_pain: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    q_experience: Mapped[str | None] = mapped_column(String(20), nullable=True)  # Блок 4
+    q_break: Mapped[str | None] = mapped_column(String(20), nullable=True)       # yes/no (legacy для алгоритма)
+    q_break_duration: Mapped[str | None] = mapped_column(String(20), nullable=True)  # no/to_1m/1_3m/3_6m/6plus
+    q_run_feel: Mapped[str | None] = mapped_column(String(20), nullable=True)    # Блок 5
+    q_pain: Mapped[str | None] = mapped_column(String(20), nullable=True)        # Блок 6: none/little/yes
+    q_pain_location: Mapped[str | None] = mapped_column(String(200), nullable=True)  # через запятую
     q_pain_increases: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    q_injury_history: Mapped[str | None] = mapped_column(String(10), nullable=True)  # yes/no
+    q_other_sports: Mapped[str | None] = mapped_column(String(200), nullable=True)   # Блок 7, через запятую
+    q_strength_frequency: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    q_self_level: Mapped[str | None] = mapped_column(String(20), nullable=True)  # Блок 8
+    q_regularity: Mapped[str | None] = mapped_column(String(20), nullable=True)  # kept for legacy
     q_strength: Mapped[str | None] = mapped_column(String(20), nullable=True)    # kept for legacy
 
     # Access & lifecycle

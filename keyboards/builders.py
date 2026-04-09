@@ -6,10 +6,38 @@ from data.timezones import TIMEZONES
 
 # ── Onboarding ────────────────────────────────────────────────────────────────
 
+def kb_skip(callback_data: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Пропустить →", callback_data=callback_data)
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_gender() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Мужской", callback_data="onb:gender:m")
+    builder.button(text="Женский", callback_data="onb:gender:f")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def kb_goal() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🏁 Начать бегать с нуля",          callback_data="onb:goal:start_zero")
+    builder.button(text="🔄 Вернуться после перерыва",       callback_data="onb:goal:return")
+    builder.button(text="🏅 Пробежать дистанцию",            callback_data="onb:goal:distance")
+    builder.button(text="⚡ Улучшить результат",             callback_data="onb:goal:improve")
+    builder.button(text="🦵 Бегать без боли",                callback_data="onb:goal:no_pain")
+    builder.button(text="💚 Общее здоровье и форма",         callback_data="onb:goal:health")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def kb_runs() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Да, бегаю", callback_data="onb:runs:yes")
-    builder.button(text="❌ Нет, не бегаю", callback_data="onb:runs:no")
+    builder.button(text="❌ Нет",              callback_data="onb:runs:no")
+    builder.button(text="🔄 Да, нерегулярно", callback_data="onb:runs:irregular")
+    builder.button(text="✅ Да, регулярно",    callback_data="onb:runs:regular")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -41,10 +69,43 @@ def kb_structure() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def kb_longest_run() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="До 5 км",   callback_data="onb:longest:to_5")
+    builder.button(text="5–10 км",   callback_data="onb:longest:5_10")
+    builder.button(text="10–15 км",  callback_data="onb:longest:10_15")
+    builder.button(text="15+ км",    callback_data="onb:longest:15plus")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def kb_experience() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Только начинаю",  callback_data="onb:exp:beginner")
+    builder.button(text="До 6 месяцев",    callback_data="onb:exp:to_6m")
+    builder.button(text="6–12 месяцев",    callback_data="onb:exp:6_12m")
+    builder.button(text="1–3 года",        callback_data="onb:exp:1_3y")
+    builder.button(text="3+ лет",          callback_data="onb:exp:3plus")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def kb_break() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Нет, бегаю без перерывов", callback_data="onb:break:no")
-    builder.button(text="⚠️ Да, был перерыв", callback_data="onb:break:yes")
+    builder.button(text="Нет перерыва",   callback_data="onb:break:no")
+    builder.button(text="До 1 месяца",    callback_data="onb:break:to_1m")
+    builder.button(text="1–3 месяца",     callback_data="onb:break:1_3m")
+    builder.button(text="3–6 месяцев",    callback_data="onb:break:3_6m")
+    builder.button(text="6+ месяцев",     callback_data="onb:break:6plus")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_run_feel() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="😮‍💨 Тяжело, задыхаюсь",   callback_data="onb:feel:hard")
+    builder.button(text="😐 Нормально, но устаю",    callback_data="onb:feel:medium")
+    builder.button(text="😊 Комфортно",              callback_data="onb:feel:easy")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -54,6 +115,71 @@ def kb_pain() -> InlineKeyboardMarkup:
     builder.button(text="Нет боли", callback_data="onb:pain:none")
     builder.button(text="Небольшая боль", callback_data="onb:pain:little")
     builder.button(text="Да, есть боль", callback_data="onb:pain:yes")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_pain_location(selected: list[str]) -> InlineKeyboardMarkup:
+    options = [
+        ("Колени",  "knees"),
+        ("Стопы",   "feet"),
+        ("Голень",  "shin"),
+        ("Ахилл",   "achilles"),
+        ("Спина",   "back"),
+        ("Другое",  "other"),
+    ]
+    builder = InlineKeyboardBuilder()
+    for label, value in options:
+        prefix = "✅ " if value in selected else ""
+        builder.button(text=f"{prefix}{label}", callback_data=f"onb:pain_loc:{value}")
+    builder.button(text="Готово →", callback_data="onb:pain_loc:done")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def kb_injury_history() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Нет", callback_data="onb:injury:no")
+    builder.button(text="Да",  callback_data="onb:injury:yes")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def kb_other_sports(selected: list[str]) -> InlineKeyboardMarkup:
+    options = [
+        ("Зал",        "gym"),
+        ("Велосипед",  "bike"),
+        ("Плавание",   "swim"),
+        ("Другое",     "other"),
+    ]
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="✅ Нет, только бег" if "none" in selected else "Нет, только бег",
+        callback_data="onb:sports:none",
+    )
+    for label, value in options:
+        prefix = "✅ " if value in selected else ""
+        builder.button(text=f"{prefix}{label}", callback_data=f"onb:sports:{value}")
+    builder.button(text="Готово →", callback_data="onb:sports:done")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def kb_strength_frequency() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Не делаю",  callback_data="onb:str_freq:no")
+    builder.button(text="Иногда",    callback_data="onb:str_freq:sometimes")
+    builder.button(text="Регулярно", callback_data="onb:str_freq:regularly")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_self_level() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🐣 Новичок",    callback_data="onb:self_lvl:beginner")
+    builder.button(text="📗 Базовый",    callback_data="onb:self_lvl:base")
+    builder.button(text="📘 Средний",    callback_data="onb:self_lvl:medium")
+    builder.button(text="📕 Продвинутый", callback_data="onb:self_lvl:advanced")
     builder.adjust(1)
     return builder.as_markup()
 

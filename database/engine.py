@@ -22,16 +22,39 @@ async def _migrate_db() -> None:
     """ADD COLUMN IF NOT EXISTS migrations — safe to run on every restart."""
     migrations: list[tuple[str, str, str]] = [
         # (table, column, definition)
-        ("users",        "status",       "VARCHAR(20) DEFAULT 'active'"),
-        ("users",        "q_runs",       "VARCHAR(10)"),
-        ("users",        "q_structure",  "VARCHAR(10)"),
-        ("session_logs", "stress_level",      "INTEGER"),
-        ("session_logs", "red_flag",           "BOOLEAN DEFAULT FALSE"),
-        ("session_logs", "fatigue_reduction",  "BOOLEAN DEFAULT FALSE"),
-        ("session_logs", "morning_sent",       "BOOLEAN DEFAULT FALSE"),
-        ("session_logs", "evening_sent",       "BOOLEAN DEFAULT FALSE"),
-        ("session_logs", "approval_pending",   "BOOLEAN DEFAULT FALSE"),
-        ("session_logs", "checkin_at",         "TIMESTAMP WITH TIME ZONE"),
+        ("users",        "status",               "VARCHAR(20) DEFAULT 'active'"),
+        ("users",        "q_runs",               "VARCHAR(20)"),
+        ("users",        "q_structure",          "VARCHAR(10)"),
+        # Блок 1 — профиль
+        ("users",        "last_name",            "VARCHAR(100)"),
+        ("users",        "first_name",           "VARCHAR(100)"),
+        ("users",        "middle_name",          "VARCHAR(100)"),
+        ("users",        "gender",               "VARCHAR(10)"),
+        # Блок 2 — цель
+        ("users",        "q_goal",               "VARCHAR(50)"),
+        # Блок 3 — текущий уровень
+        ("users",        "q_longest_run",        "VARCHAR(20)"),
+        # Блок 4 — опыт
+        ("users",        "q_experience",         "VARCHAR(20)"),
+        ("users",        "q_break_duration",     "VARCHAR(20)"),
+        # Блок 5 — ощущения
+        ("users",        "q_run_feel",           "VARCHAR(20)"),
+        # Блок 6 — боль
+        ("users",        "q_pain_location",      "VARCHAR(200)"),
+        ("users",        "q_injury_history",     "VARCHAR(10)"),
+        # Блок 7 — физическая форма
+        ("users",        "q_other_sports",       "VARCHAR(200)"),
+        ("users",        "q_strength_frequency", "VARCHAR(20)"),
+        # Блок 8 — самооценка
+        ("users",        "q_self_level",         "VARCHAR(20)"),
+        # session_logs
+        ("session_logs", "stress_level",         "INTEGER"),
+        ("session_logs", "red_flag",             "BOOLEAN DEFAULT FALSE"),
+        ("session_logs", "fatigue_reduction",    "BOOLEAN DEFAULT FALSE"),
+        ("session_logs", "morning_sent",         "BOOLEAN DEFAULT FALSE"),
+        ("session_logs", "evening_sent",         "BOOLEAN DEFAULT FALSE"),
+        ("session_logs", "approval_pending",     "BOOLEAN DEFAULT FALSE"),
+        ("session_logs", "checkin_at",           "TIMESTAMP WITH TIME ZONE"),
     ]
     async with engine.begin() as conn:
         for table, column, definition in migrations:

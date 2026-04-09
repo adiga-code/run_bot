@@ -269,7 +269,7 @@ async def _send_report(message, session: AsyncSession, user_id: int, as_file: bo
         select(SessionLog, Workout)
         .outerjoin(Workout, SessionLog.assigned_workout_id == Workout.id)
         .where(SessionLog.user_id == user_id)
-        .order_by(SessionLog.day_index)
+        .order_by(SessionLog.date)
     )
     rows = result.all()
 

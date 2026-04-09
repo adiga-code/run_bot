@@ -43,26 +43,14 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession) 
     )
 
     if created or not user.onboarding_complete:
-        name_known = user.full_name and user.full_name != "Участник"
-        if name_known:
-            # Name was collected at application stage — skip the ФИО step
-            await state.set_state(OnboardingStates.birth_date)
-            first = user.full_name.split()[0]
-            await message.answer(
-                f"👋 Привет, {first}! Я твой беговой помощник на 28 дней.\n\n"
-                "Давай подберём программу под тебя — пара вопросов.\n\n"
-                "Укажи дату рождения в формате <b>ДД.ММ.ГГГГ</b>:",
-                parse_mode="HTML",
-            )
-        else:
-            await state.set_state(OnboardingStates.full_name)
-            await message.answer(
-                "👋 Привет! Я твой беговой помощник на 28 дней.\n\n"
-                "Давай познакомимся и подберём программу под тебя.\n"
-                "Это займёт около 2 минут.\n\n"
-                "Напиши своё <b>полное имя</b> (ФИО):",
-                parse_mode="HTML",
-            )
+        await state.set_state(OnboardingStates.last_name)
+        await message.answer(
+            "👋 Привет! Я твой беговой помощник на 28 дней.\n\n"
+            "Давай познакомимся и подберём программу под тебя.\n"
+            "Это займёт около 3 минут.\n\n"
+            "Введи свою <b>фамилию</b>:",
+            parse_mode="HTML",
+        )
         return
 
     await message.answer(
