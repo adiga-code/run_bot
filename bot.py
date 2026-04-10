@@ -5,7 +5,7 @@ import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiohttp import ClientSession
+from aiogram.client.session.aiohttp import AiohttpSession
 
 from config import settings
 from database.engine import create_db, seed_workouts, session_maker
@@ -42,15 +42,14 @@ logger = logging.getLogger(__name__)
 # ================= MAIN =================
 
 async def main() -> None:
-    # 🔥 ПРОКСИ (исправленный формат)
+    # 🔥 ПРОКСИ
     proxy_url = "http://cCxo2n:8rbnxc@194.59.8.97:1733"
 
-    session = ClientSession()
+    session = AiohttpSession(proxy=proxy_url)
 
     bot = Bot(
         token=settings.bot_token,
         session=session,
-        proxy=proxy_url,
     )
 
     dp = Dispatcher(storage=MemoryStorage())
@@ -94,8 +93,6 @@ async def main() -> None:
     finally:
         scheduler.shutdown()
         await bot.session.close()
-        await session.close()
-
 
 # ================= ENTRY =================
 
