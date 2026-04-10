@@ -5,6 +5,7 @@ import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiohttp import ClientSession
 
 from config import settings
 from database.engine import create_db, seed_workouts, session_maker
@@ -13,11 +14,11 @@ from database.whitelist_middleware import WhitelistMiddleware
 from handlers import admin, checkin, onboarding, progress, reminders, start, workout
 from scheduler.tasks import setup_scheduler
 
-# Ensure logs directory exists
+# ================= LOGGING =================
+
 _LOGS_DIR = "/app/logs"
 os.makedirs(_LOGS_DIR, exist_ok=True)
 
-# Root logger: console + rotating file
 _root_logger = logging.getLogger()
 _root_logger.setLevel(logging.INFO)
 
@@ -29,7 +30,7 @@ _root_logger.addHandler(_console_handler)
 
 _file_handler = logging.handlers.RotatingFileHandler(
     os.path.join(_LOGS_DIR, "bot.log"),
-    maxBytes=5 * 1024 * 1024,  # 5 MB
+    maxBytes=5 * 1024 * 1024,
     backupCount=3,
     encoding="utf-8",
 )
@@ -38,17 +39,28 @@ _root_logger.addHandler(_file_handler)
 
 logger = logging.getLogger(__name__)
 
+# ================= MAIN =================
 
 async def main() -> None:
-    bot = Bot(token=settings.bot_token)
+    # 🔥 ПРОКСИ (исправленный формат)
+    proxy_url = "http://cCxo2n:8rbnxc@194.59.8.97:1733"
+
+    session = ClientSession()
+
+    bot = Bot(
+        token=settings.bot_token,
+        session=session,
+        proxy=proxy_url,
+    )
+
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Middleware chain (order matters)
-    dp.update.middleware(DatabaseMiddleware(session_maker))   # 1. inject session
-    dp.update.middleware(WhitelistMiddleware())               # 2. check access
+    # Middleware
+    dp.update.middleware(DatabaseMiddleware(session_maker))
+    dp.update.middleware(WhitelistMiddleware())
 
-    # Routers (registration order = handler priority)
-    dp.include_router(admin.router)       # admin commands first (no FSM conflicts)
+    # Routers
+    dp.include_router(admin.router)
     dp.include_router(start.router)
     dp.include_router(onboarding.router)
     dp.include_router(checkin.router)
@@ -56,7 +68,7 @@ async def main() -> None:
     dp.include_router(reminders.router)
     dp.include_router(progress.router)
 
-    # DB init
+    # DB
     await create_db()
     await seed_workouts()
 
@@ -65,8 +77,16 @@ async def main() -> None:
     scheduler.start()
     logger.info("Scheduler started")
 
-    # Drop pending updates and start polling
-    await bot.delete_webhook(drop_pending_updates=True)
+    # 🔥 Безопасный delete_webhook
+    try:
+        await bot.delete_webhook(
+            drop_pending_updates=True,
+            request_timeout=30,
+        )
+        logger.info("Webhook deleted")
+    except Exception as e:
+        logger.error(f"delete_webhook failed: {e}")
+
     logger.info("Bot started")
 
     try:
@@ -74,7 +94,10 @@ async def main() -> None:
     finally:
         scheduler.shutdown()
         await bot.session.close()
+        await session.close()
 
+
+# ================= ENTRY =================
 
 if __name__ == "__main__":
     asyncio.run(main())
