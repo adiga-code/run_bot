@@ -59,10 +59,14 @@ async def _send_morning_reminders(bot: Bot, session_maker: async_sessionmaker[As
 async def _check_week_completion(session_maker: async_sessionmaker[AsyncSession]) -> None:
     """
     Run at 23:55 UTC every day.
-    For users whose calendar day is 7, 14, 21, or 28 (end of a real week),
+    For users whose calendar day is 7 or 14 (end of weeks 1 or 2),
     check weekly completion rate based on calendar dates.
     If < 75%, increment week_repeat_count so the next workout template
     repeats the same week — without moving the calendar day back.
+
+    Week 3 (day 21) is NEVER repeated — all users automatically advance
+    to week 4 (day 22+) regardless of completion rate.
+    Week 4 (day 28) is the final week and is never repeated either.
     """
     from datetime import timedelta
     async with session_maker() as session:
@@ -71,8 +75,8 @@ async def _check_week_completion(session_maker: async_sessionmaker[AsyncSession]
         users = await user_svc.all_active()
         for user in users:
             calendar_day = await user_svc.current_calendar_day(user)
-            if calendar_day is None or calendar_day % 7 != 0:
-                continue  # not end-of-week today
+            if calendar_day not in (7, 14):
+                continue  # week repeats only apply to weeks 1 and 2
 
             # Date range for this calendar week
             week_end_date = user.program_start_date + timedelta(days=calendar_day - 1)

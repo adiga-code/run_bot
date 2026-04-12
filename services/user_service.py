@@ -65,11 +65,19 @@ class UserService:
         Returns the training-template day (1-28) used for workout lookup.
         Subtracts 7 per week_repeat_count so the user re-runs the same
         workout week when they underperformed.
+
+        Hard rule: from calendar day 22 onward, template day always equals
+        calendar day — users are forced into week 4 regardless of repeat count.
+        Week repeats only apply to weeks 1 and 2 (calendar days 1-21).
         """
         if not user.program_start_date:
             return None
         delta = (date.today() - user.program_start_date).days
-        day_index = delta + 1 - (user.week_repeat_count * 7)
+        calendar_day = delta + 1
+        day_index = calendar_day - (user.week_repeat_count * 7)
+        # From day 22 onward: always week 4, no rollback
+        if calendar_day >= 22:
+            day_index = calendar_day
         return max(1, min(28, day_index))
 
     # Keep legacy name as alias for template day — used in log creation and
