@@ -58,6 +58,8 @@ class User(Base):
     q_other_sports: Mapped[str | None] = mapped_column(String(200), nullable=True)   # Блок 7, через запятую
     q_strength_frequency: Mapped[str | None] = mapped_column(String(20), nullable=True)
     q_self_level: Mapped[str | None] = mapped_column(String(20), nullable=True)  # Блок 8
+    q_distance: Mapped[str | None] = mapped_column(String(20), nullable=True)     # Блок 2 (если цель = distance)
+    q_race_date: Mapped[str | None] = mapped_column(String(50), nullable=True)   # Блок 2 (дата старта)
     q_regularity: Mapped[str | None] = mapped_column(String(20), nullable=True)  # kept for legacy
     q_strength: Mapped[str | None] = mapped_column(String(20), nullable=True)    # kept for legacy
 

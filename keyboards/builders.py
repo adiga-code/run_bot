@@ -33,6 +33,17 @@ def kb_goal() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def kb_distance() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="5 км",           callback_data="onb:distance:5k")
+    builder.button(text="10 км",          callback_data="onb:distance:10k")
+    builder.button(text="Полумарафон",    callback_data="onb:distance:half")
+    builder.button(text="Марафон",        callback_data="onb:distance:full")
+    builder.button(text="Другая",         callback_data="onb:distance:other")
+    builder.adjust(2, 2, 1)
+    return builder.as_markup()
+
+
 def kb_runs() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="❌ Нет",              callback_data="onb:runs:no")

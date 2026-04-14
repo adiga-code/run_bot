@@ -28,6 +28,20 @@ _SLEEP_LABELS    = {1: "плохо", 2: "нормально", 3: "хорошо"}
 _PAIN_LABELS     = {1: "нет", 2: "немного", 3: "есть"}
 _STRESS_LABELS   = {1: "нет", 2: "умеренный", 3: "сильный"}
 _VERSION_LABELS  = {"base": "Base (полная)", "light": "Light (лёгкая)", "recovery": "Recovery", "rest": "Отдых"}
+_PAIN_HIST       = {1: "нет", 2: "немного", 3: "есть"}
+_WELLBEING_HIST  = {1: "плохо", 2: "тяжел.", 3: "норм.", 4: "хорошо", 5: "отлично"}
+
+
+def _build_history_line(recent_logs) -> str:
+    """One-line summary of the last N logs for the admin approval card."""
+    if not recent_logs:
+        return ""
+    parts = []
+    for log in recent_logs:
+        wb = _WELLBEING_HIST.get(log.wellbeing, "?")
+        pain = _PAIN_HIST.get(log.pain_level, "?")
+        parts.append(f"сам:{wb} боль:{pain}")
+    return "📊 История (" + " → ".join(parts) + ")"
 _DAY_TYPE_LABELS = {"run": "Бег", "strength": "Силовая", "recovery": "Восстановление", "rest": "Отдых"}
 
 router = Router()
@@ -344,6 +358,7 @@ async def _finish_checkin(
 
     # Build approval card for non-admin athletes
     day_type_label = _DAY_TYPE_LABELS.get(day_type, day_type)
+    history_line = _build_history_line(recent_logs) if decision.fatigue_reduction else ""
     card = (
         f"👤 <b>{user.full_name}</b> — День {calendar_day} из 28 ({day_type_label})\n"
         f"Самочувствие: {_WELLBEING_LABELS.get(checkin.wellbeing, '?')} | "
@@ -352,6 +367,7 @@ async def _finish_checkin(
         f"Стресс: {_STRESS_LABELS.get(checkin.stress_level, '?')}\n\n"
         f"🤖 Рекомендация: <b>{_VERSION_LABELS.get(decision.version, decision.version)}</b>\n"
         f"📝 {decision.reason}"
+        + (f"\n{history_line}" if history_line else "")
     )
     for admin_id in settings.admin_ids:
         try:

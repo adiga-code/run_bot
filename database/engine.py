@@ -32,6 +32,8 @@ async def _migrate_db() -> None:
         ("users",        "gender",               "VARCHAR(10)"),
         # Блок 2 — цель
         ("users",        "q_goal",               "VARCHAR(50)"),
+        ("users",        "q_distance",           "VARCHAR(20)"),
+        ("users",        "q_race_date",          "VARCHAR(50)"),
         # Блок 3 — текущий уровень
         ("users",        "q_longest_run",        "VARCHAR(20)"),
         # Блок 4 — опыт

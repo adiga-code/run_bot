@@ -9,9 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from engine.level_assignment import OnboardingAnswers, assign_level
 from keyboards.builders import (
-    kb_admin_approve, kb_break, kb_experience, kb_frequency, kb_gender,
-    kb_goal, kb_injury_history, kb_location, kb_longest_run, kb_main_menu,
-    kb_other_sports, kb_pain, kb_pain_increases, kb_pain_location,
+    kb_admin_approve, kb_break, kb_distance, kb_experience, kb_frequency,
+    kb_gender, kb_goal, kb_injury_history, kb_location, kb_longest_run,
+    kb_main_menu, kb_other_sports, kb_pain, kb_pain_increases, kb_pain_location,
     kb_run_feel, kb_runs, kb_self_level, kb_skip, kb_strength_frequency,
     kb_structure, kb_timezone, kb_volume,
 )
@@ -34,6 +34,8 @@ class OnboardingStates(StatesGroup):
     timezone = State()
     # Блок 2 — цель
     q_goal = State()
+    q_distance = State()   # только если цель = distance
+    q_race_date = State()  # только если цель = distance
     # Блок 3 — текущий уровень
     q_runs = State()
     q_frequency = State()
@@ -217,6 +219,56 @@ async def step_timezone(callback: CallbackQuery, state: FSMContext) -> None:
 async def step_q_goal(callback: CallbackQuery, state: FSMContext) -> None:
     value = callback.data.split(":")[2]
     await state.update_data(q_goal=value)
+    await callback.message.edit_reply_markup()
+    await safe_answer(callback)
+
+    if value == "distance":
+        await state.set_state(OnboardingStates.q_distance)
+        await callback.message.answer(
+            "<b>Какая дистанция?</b>",
+            parse_mode="HTML",
+            reply_markup=kb_distance(),
+        )
+    else:
+        await state.set_state(OnboardingStates.q_runs)
+        await callback.message.answer(
+            "<b>Ты бегаешь сейчас?</b>",
+            parse_mode="HTML",
+            reply_markup=kb_runs(),
+        )
+
+
+# ── Блок 2: Дистанция (только для цели distance) ─────────────────────────────
+
+@router.callback_query(OnboardingStates.q_distance, F.data.startswith("onb:distance:"))
+async def step_q_distance(callback: CallbackQuery, state: FSMContext) -> None:
+    value = callback.data.split(":")[2]
+    await state.update_data(q_distance=value)
+    await callback.message.edit_reply_markup()
+    await safe_answer(callback)
+    await state.set_state(OnboardingStates.q_race_date)
+    await callback.message.answer(
+        "<b>Когда старт / гонка?</b>\n\n"
+        "Напиши примерную дату (например: <i>15.06.2026</i> или <i>июнь 2026</i>)",
+        parse_mode="HTML",
+        reply_markup=kb_skip("onb:skip:race_date"),
+    )
+
+
+@router.message(OnboardingStates.q_race_date)
+async def step_q_race_date(message: Message, state: FSMContext) -> None:
+    await state.update_data(q_race_date=message.text.strip())
+    await state.set_state(OnboardingStates.q_runs)
+    await message.answer(
+        "<b>Ты бегаешь сейчас?</b>",
+        parse_mode="HTML",
+        reply_markup=kb_runs(),
+    )
+
+
+@router.callback_query(OnboardingStates.q_race_date, F.data == "onb:skip:race_date")
+async def step_q_race_date_skip(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(q_race_date=None)
     await callback.message.edit_reply_markup()
     await safe_answer(callback)
     await state.set_state(OnboardingStates.q_runs)
@@ -608,6 +660,8 @@ async def step_q_self_level(callback: CallbackQuery, state: FSMContext, session:
         status="pending",
         # Блок 2
         q_goal=data.get("q_goal"),
+        q_distance=data.get("q_distance"),
+        q_race_date=data.get("q_race_date"),
         # Блок 3
         q_runs=data.get("q_runs"),
         q_frequency=data.get("q_frequency"),
@@ -650,6 +704,7 @@ async def step_q_self_level(callback: CallbackQuery, state: FSMContext, session:
         "no_pain":    "Бегать без боли",
         "health":     "Общее здоровье и форма",
     }
+    dist_labels    = {"5k": "5 км", "10k": "10 км", "half": "Полумарафон", "full": "Марафон", "other": "Другая"}
     runs_labels    = {"no": "Нет", "irregular": "Нерегулярно", "regular": "Регулярно"}
     freq_labels    = {"0_1": "0–1 р/нед", "2_3": "2–3 р/нед", "4plus": "4+ р/нед"}
     vol_labels     = {"to_10": "до 10 км", "10_25": "10–25 км", "25_50": "25–50 км", "50plus": "50+ км"}
@@ -672,8 +727,13 @@ async def step_q_self_level(callback: CallbackQuery, state: FSMContext, session:
         f"Telegram: {tg_link}\n"
         f"ID: <code>{callback.from_user.id}</code>\n"
         f"Пол: {gender_lbl.get(data.get('gender', ''), '—')}\n\n"
-        f"<b>Цель:</b> {goal_labels.get(data.get('q_goal', ''), '—')}\n\n"
-        f"<b>Бег:</b>\n"
+        f"<b>Цель:</b> {goal_labels.get(data.get('q_goal', ''), '—')}\n"
+        + (
+            f"• Дистанция: {dist_labels.get(data.get('q_distance', ''), '—')}\n"
+            f"• Дата старта: {data.get('q_race_date') or '—'}\n"
+            if data.get("q_goal") == "distance" else ""
+        )
+        + f"\n<b>Бег:</b>\n"
         f"• Бегает: {runs_labels.get(data.get('q_runs', 'no'), '—')}\n"
         f"• Частота: {freq_labels.get(data.get('q_frequency', ''), '—')}\n"
         f"• Объём: {vol_labels.get(data.get('q_volume', ''), '—')}\n"
