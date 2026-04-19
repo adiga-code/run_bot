@@ -63,6 +63,9 @@ class User(Base):
     q_regularity: Mapped[str | None] = mapped_column(String(20), nullable=True)  # kept for legacy
     q_strength: Mapped[str | None] = mapped_column(String(20), nullable=True)    # kept for legacy
 
+    # Extended program
+    extended_week5: Mapped[bool] = mapped_column(Boolean, default=False)  # trainer can add 5th week
+
     # Access & lifecycle
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     onboarding_complete: Mapped[bool] = mapped_column(Boolean, default=False)

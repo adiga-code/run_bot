@@ -49,6 +49,8 @@ async def _migrate_db() -> None:
         ("users",        "q_strength_frequency", "VARCHAR(20)"),
         # Блок 8 — самооценка
         ("users",        "q_self_level",         "VARCHAR(20)"),
+        # Extended program
+        ("users",        "extended_week5",       "BOOLEAN DEFAULT FALSE"),
         # session_logs
         ("session_logs", "stress_level",         "INTEGER"),
         ("session_logs", "red_flag",             "BOOLEAN DEFAULT FALSE"),

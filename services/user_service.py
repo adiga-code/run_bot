@@ -49,36 +49,41 @@ class UserService:
         await self.session.refresh(user)
         return user
 
+    def _max_day(self, user: User) -> int:
+        """Returns the maximum program day for this user (28 or 35 if week 5 is activated)."""
+        return 35 if getattr(user, "extended_week5", False) else 28
+
     async def current_calendar_day(self, user: User) -> int | None:
         """
-        Returns the user's real calendar day in the program (1-28).
+        Returns the user's real calendar day in the program (1-28 or 1-35).
         Never decreases — always delta+1 regardless of week repeats.
-        Shown in UI as "День X из 28".
+        Shown in UI as "День X из 28/35".
         """
         if not user.program_start_date:
             return None
         delta = (date.today() - user.program_start_date).days
-        return max(1, min(28, delta + 1))
+        return max(1, min(self._max_day(user), delta + 1))
 
     async def current_template_day(self, user: User) -> int | None:
         """
-        Returns the training-template day (1-28) used for workout lookup.
+        Returns the training-template day (1-28 or 1-35) used for workout lookup.
         Subtracts 7 per week_repeat_count so the user re-runs the same
         workout week when they underperformed.
 
         Hard rule: from calendar day 22 onward, template day always equals
         calendar day — users are forced into week 4 regardless of repeat count.
         Week repeats only apply to weeks 1 and 2 (calendar days 1-21).
+        Week 5 (days 29-35) is only available when extended_week5=True.
         """
         if not user.program_start_date:
             return None
         delta = (date.today() - user.program_start_date).days
         calendar_day = delta + 1
         day_index = calendar_day - (user.week_repeat_count * 7)
-        # From day 22 onward: always week 4, no rollback
+        # From day 22 onward: always week 4+, no rollback
         if calendar_day >= 22:
             day_index = calendar_day
-        return max(1, min(28, day_index))
+        return max(1, min(self._max_day(user), day_index))
 
     # Keep legacy name as alias for template day — used in log creation and
     # workout lookups. Do NOT use for display; use current_calendar_day instead.

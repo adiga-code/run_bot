@@ -355,12 +355,49 @@ async def cb_admin_manage(callback: CallbackQuery, session: AsyncSession) -> Non
 
     current_day = await user_svc.current_calendar_day(user) or "?"
     level_name = LEVEL_NAMES.get(user.level, "?")
+    max_day = 35 if getattr(user, "extended_week5", False) else 28
+    week5_status = " | 📅 5-я неделя" if getattr(user, "extended_week5", False) else ""
     await callback.message.answer(
         f"⚙️ <b>{user.full_name}</b>\n"
-        f"Уровень: {level_name} | День: {current_day}/28",
+        f"Уровень: {level_name} | День: {current_day}/{max_day}{week5_status}",
         parse_mode="HTML",
-        reply_markup=kb_admin_manage(user_id),
+        reply_markup=kb_admin_manage(user_id, extended=getattr(user, "extended_week5", False)),
     )
+
+
+@router.callback_query(F.data.startswith("adm:extend:"))
+async def cb_admin_extend_week5(callback: CallbackQuery, session: AsyncSession) -> None:
+    """Toggle week 5 extension for a user."""
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    parts = callback.data.split(":")
+    # adm:extend:<user_id>  → activate
+    # adm:extend:off:<user_id> → deactivate
+    if parts[2] == "off":
+        user_id = int(parts[3])
+        activate = False
+    else:
+        user_id = int(parts[2])
+        activate = True
+
+    user_svc = UserService(session)
+    user = await user_svc.get(user_id)
+    if not user:
+        await callback.message.answer("Пользователь не найден.")
+        return
+
+    await user_svc.update(user, extended_week5=activate)
+
+    status_text = "✅ 5-я неделя активирована" if activate else "❌ 5-я неделя отключена"
+    await callback.message.answer(
+        f"{status_text} для <b>{user.full_name}</b>",
+        parse_mode="HTML",
+        reply_markup=kb_admin_manage(user_id, extended=activate),
+    )
+    logger.info("Admin %s %s week5 for user %s", callback.from_user.id, "activated" if activate else "deactivated", user_id)
 
 
 @router.callback_query(F.data.startswith("adm:mode:") & ~F.data.startswith("adm:mode:set:"))

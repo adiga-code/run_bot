@@ -26,7 +26,8 @@ async def _create_daily_logs(session_maker: async_sessionmaker[AsyncSession]) ->
         users = await user_svc.all_active()
         for user in users:
             day = await user_svc.current_program_day(user)
-            if day is not None and day <= 28:
+            max_day = 35 if getattr(user, "extended_week5", False) else 28
+            if day is not None and day <= max_day:
                 await log_svc.get_or_create_today(user.telegram_id, day)
 
 

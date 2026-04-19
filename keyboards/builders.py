@@ -375,13 +375,17 @@ def kb_admin_report_actions(user_id: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def kb_admin_manage(user_id: int) -> InlineKeyboardMarkup:
+def kb_admin_manage(user_id: int, extended: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🔄 Изменить режим дня", callback_data=f"adm:mode:{user_id}")
     builder.button(text="⏭️ Перейти к дню", callback_data=f"adm:jump:{user_id}")
     builder.button(text="🎯 Изменить уровень", callback_data=f"adm:pick:{user_id}")
     builder.button(text="📝 Отметить тренировку", callback_data=f"adm:markday:{user_id}")
     builder.button(text="✉️ Отправить сообщение", callback_data=f"adm:msg:{user_id}")
+    if not extended:
+        builder.button(text="➕ Продлить на 5-ю неделю", callback_data=f"adm:extend:{user_id}")
+    else:
+        builder.button(text="✅ 5-я неделя активна", callback_data=f"adm:extend:off:{user_id}")
     builder.button(text="◀️ Назад", callback_data=f"adm:report:view:{user_id}")
     builder.adjust(1)
     return builder.as_markup()
