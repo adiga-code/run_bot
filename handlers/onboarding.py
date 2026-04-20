@@ -726,7 +726,9 @@ async def step_q_self_level(callback: CallbackQuery, state: FSMContext, session:
         f"Имя: <b>{full_name}</b>\n"
         f"Telegram: {tg_link}\n"
         f"ID: <code>{callback.from_user.id}</code>\n"
-        f"Пол: {gender_lbl.get(data.get('gender', ''), '—')}\n\n"
+        f"Пол: {gender_lbl.get(data.get('gender', ''), '—')}\n"
+        f"Город: {data.get('city') or '—'}\n"
+        f"Район: {data.get('district') or '—'}\n\n"
         f"<b>Цель:</b> {goal_labels.get(data.get('q_goal', ''), '—')}\n"
         + (
             f"• Дистанция: {dist_labels.get(data.get('q_distance', ''), '—')}\n"
