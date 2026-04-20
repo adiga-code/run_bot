@@ -173,7 +173,7 @@ async def _send_evening_reminders(bot: Bot, session_maker: async_sessionmaker[As
 async def _auto_approve_checkins(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> None:
     """
     Run every minute. Auto-sends the bot's recommended workout to users whose
-    check-in has been pending admin approval for more than 60 minutes.
+    check-in has been pending admin approval for more than 10 minutes.
     """
     async with session_maker() as session:
         from handlers.utils import send_workout_to_user
@@ -181,7 +181,7 @@ async def _auto_approve_checkins(bot: Bot, session_maker: async_sessionmaker[Asy
         wk_svc = WorkoutService(session)
         user_svc = UserService(session)
 
-        logs = await log_svc.pending_checkin_approvals(timeout_minutes=60)
+        logs = await log_svc.pending_checkin_approvals(timeout_minutes=10)
         for log in logs:
             try:
                 user = log.user
@@ -236,7 +236,7 @@ def setup_scheduler(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -
         replace_existing=True,
     )
 
-    # Every minute: auto-send workout if admin hasn't approved in 60 min
+    # Every minute: auto-send workout if admin hasn't approved in 10 min
     scheduler.add_job(
         _auto_approve_checkins,
         CronTrigger(minute="*"),
