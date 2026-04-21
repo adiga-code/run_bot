@@ -11,11 +11,15 @@ INTERPRETATIONS: dict[str, str] = {
         "Восстановление сегодня — это и есть твоя тренировка. "
         "Ты следуешь системе, и это правильно 💪"
     ),
-    "fatigue": (
+    "fatigue_recovery": (
         "😴 Видно накопилась усталость за последние дни. "
         "Снизим нагрузку — восстановление тоже часть тренировки.\n\n"
         "Восстановление сегодня — это и есть твоя тренировка. "
         "Ты следуешь системе, и это правильно 💪"
+    ),
+    "fatigue_light": (
+        "😴 Видно накопилась усталость. "
+        "Сегодня лёгкий вариант — тело получит нагрузку без лишнего стресса."
     ),
     "light_wellbeing": (
         "😐 Самочувствие пониженное. Выйдем чуть легче — "
@@ -49,11 +53,12 @@ def get_interpretation(version: str, checkin_wellbeing: int, red_flag: bool, fat
     if red_flag:
         return INTERPRETATIONS["red_flag"]
     if fatigue_reduction:
-        return INTERPRETATIONS["fatigue"]
+        if version == "recovery":
+            return INTERPRETATIONS["fatigue_recovery"]
+        return INTERPRETATIONS["fatigue_light"]
     if version == "recovery":
         return INTERPRETATIONS["red_flag"]  # recovery without explicit red flag → same message
     if version == "light":
-        # Pick most relevant light reason
         return INTERPRETATIONS["light_wellbeing"]
     # base
     if checkin_wellbeing >= 4:
