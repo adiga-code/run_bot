@@ -7,13 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from handlers.utils import safe_answer
 from keyboards.builders import kb_completion, kb_effort, kb_had_pain, kb_main_menu, kb_completion_strength
 from services.session_log_service import SessionLogService
+from texts import T
 
 router = Router()
 
 ENCOURAGING_MESSAGES = {
-    "done": "🔥 Отлично! Ещё один день программы позади. Ты делаешь это!",
-    "partial": "💪 Молодец, что вышел(ла)! Частично — лучше, чем совсем пропустить.",
-    "skipped": "😌 Бывает. Главное — не пропускать два дня подряд. Завтра — новый шанс!",
+    "done":    T.workout.encouraging_done,
+    "partial": T.workout.encouraging_partial,
+    "skipped": T.workout.encouraging_skipped,
 }
 
 
@@ -23,14 +24,7 @@ class WorkoutStates(StatesGroup):
     had_pain = State()
 
 
-BASIC_WORKOUT_TEXT = (
-    "🏃 <b>Базовая тренировка:</b>\n\n"
-    "- Приседания — 3×15\n"
-    "- Отжимания — 3×10\n"
-    "- Выпады — 3×10/нога\n"
-    "- Планка — 3×30 сек\n"
-    "- Скручивания — 3×15"
-)
+BASIC_WORKOUT_TEXT = T.workout.basic_workout
 
 
 @router.callback_query(F.data == "wk:mark")
@@ -40,11 +34,11 @@ async def cb_mark_workout(callback: CallbackQuery, state: FSMContext, session: A
     log = await log_svc.get_today(callback.from_user.id)
 
     if not log:
-        await safe_answer(callback, text="Не нашёл тренировку на сегодня.", show_alert=True)
+        await safe_answer(callback, text=T.workout.not_found, show_alert=True)
         return
 
     if log.completion_status:
-        await safe_answer(callback, text="Тренировка уже отмечена ✅", show_alert=True)
+        await safe_answer(callback, text=T.workout.already_marked, show_alert=True)
         return
 
     await callback.message.edit_reply_markup()
@@ -56,7 +50,7 @@ async def cb_mark_workout(callback: CallbackQuery, state: FSMContext, session: A
         and log.assigned_workout_id is not None
     )
     await callback.message.answer(
-        "Как прошла тренировка?",
+        T.workout.ask_completion,
         reply_markup=kb_completion_strength() if is_strength else kb_completion(),
     )
 
@@ -68,13 +62,13 @@ async def cb_custom_workout(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(WorkoutStates.completion)
     try:
         await callback.message.edit_text(
-            f"{BASIC_WORKOUT_TEXT}\n\nОтметь результат после выполнения:",
+            BASIC_WORKOUT_TEXT + T.workout.mark_suffix,
             parse_mode="HTML",
             reply_markup=kb_completion(),
         )
     except Exception:
         await callback.message.answer(
-            f"{BASIC_WORKOUT_TEXT}\n\nОтметь результат после выполнения:",
+            BASIC_WORKOUT_TEXT + T.workout.mark_suffix,
             parse_mode="HTML",
             reply_markup=kb_completion(),
         )
@@ -94,10 +88,7 @@ async def cb_completion_status(callback: CallbackQuery, state: FSMContext, sessi
         return
 
     await state.set_state(WorkoutStates.effort)
-    await callback.message.answer(
-        "Насколько тяжело было?\n(1 — легко, 5 — очень тяжело)",
-        reply_markup=kb_effort(),
-    )
+    await callback.message.answer(T.workout.ask_effort, reply_markup=kb_effort())
 
 
 @router.callback_query(WorkoutStates.effort, F.data.startswith("wk:effort:"))
@@ -107,7 +98,7 @@ async def cb_effort(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_reply_markup()
     await safe_answer(callback)
     await state.set_state(WorkoutStates.had_pain)
-    await callback.message.answer("Была ли боль во время тренировки?", reply_markup=kb_had_pain())
+    await callback.message.answer(T.workout.ask_pain, reply_markup=kb_had_pain())
 
 
 @router.callback_query(WorkoutStates.had_pain, F.data.startswith("wk:pain:"))
@@ -141,15 +132,10 @@ async def _save_completion(callback: CallbackQuery, data: dict, session: AsyncSe
         )
 
     await callback.message.answer(
-        ENCOURAGING_MESSAGES.get(data["status"], "Записал!"),
+        ENCOURAGING_MESSAGES.get(data["status"], T.workout.encouraging_default),
         reply_markup=kb_main_menu(),
     )
 
     # Day 28 — program complete
     if log and log.day_index == 28 and data["status"] in ("done", "partial"):
-        await callback.message.answer(
-            "🏅 <b>Ты прошёл(ла) 28-дневную программу!</b>\n\n"
-            "Это не просто цифра — это 28 дней дисциплины, работы над собой и доверия процессу.\n\n"
-            "Ты справился(ась). Так держать! 💪🔥",
-            parse_mode="HTML",
-        )
+        await callback.message.answer(T.workout.program_complete, parse_mode="HTML")

@@ -19,6 +19,7 @@ from keyboards.builders import (
 )
 from services.user_service import UserService
 from services.whitelist_service import WhitelistService
+from texts import T
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +43,7 @@ def is_admin(user_id: int) -> bool:
 async def cmd_admin(message: Message) -> None:
     if not is_admin(message.from_user.id):
         return
-    await message.answer(
-        "🛠 <b>Панель администратора</b>",
-        parse_mode="HTML",
-        reply_markup=kb_admin_menu(),
-    )
+    await message.answer(T.admin.panel_header, parse_mode="HTML", reply_markup=kb_admin_menu())
 
 
 @router.callback_query(F.data == "adm:menu:pending")
@@ -65,13 +62,12 @@ async def cb_admin_pending(callback: CallbackQuery, session: AsyncSession) -> No
     users = list(result.scalars().all())
 
     if not users:
-        await callback.message.answer(
-            "✅ Нет пользователей, ожидающих подтверждения.",
-            reply_markup=kb_admin_menu(),
-        )
+        await callback.message.answer(T.admin.no_pending, reply_markup=kb_admin_menu())
         return
 
-    await callback.message.answer(f"⏳ Ожидают подтверждения: <b>{len(users)}</b>", parse_mode="HTML")
+    await callback.message.answer(
+        T.admin.pending_count.format(count=len(users)), parse_mode="HTML"
+    )
     for u in users:
         level_name = LEVEL_NAMES.get(u.level, "?")
         await callback.message.answer(
@@ -103,9 +99,7 @@ async def cb_admin_stats(callback: CallbackQuery, session: AsyncSession) -> None
         for lvl, name in LEVEL_NAMES.items()
     )
     await callback.message.answer(
-        f"<b>Статистика бота</b>\n\n"
-        f"Активных пользователей: <b>{len(users)}</b>\n\n"
-        f"По уровням:\n{level_lines}",
+        T.admin.stats_text.format(count=len(users), level_lines=level_lines),
         parse_mode="HTML",
         reply_markup=kb_admin_menu(),
     )
@@ -127,14 +121,14 @@ async def cb_admin_users(callback: CallbackQuery, session: AsyncSession) -> None
     users = list(result.scalars().all())
 
     if not users:
-        await callback.message.answer("Нет зарегистрированных пользователей.", reply_markup=kb_admin_menu())
+        await callback.message.answer(T.admin.no_users, reply_markup=kb_admin_menu())
         return
 
-    lines = [f"<b>Все пользователи ({len(users)}):</b>\n"]
+    lines = [T.admin.all_users_header.format(count=len(users))]
     for u in users:
         level_name = LEVEL_NAMES.get(u.level, "?") if u.level else "—"
         status_icon = "✅" if u.status == "active" else "⏳"
-        started = u.program_start_date.strftime("%d.%m") if u.program_start_date else "не начата"
+        started = u.program_start_date.strftime("%d.%m") if u.program_start_date else T.admin.not_started
         lines.append(
             f"{status_icon} <b>{u.full_name}</b>\n"
             f"   ID: <code>{u.telegram_id}</code> | {level_name} | Старт: {started}"
@@ -165,8 +159,6 @@ async def cb_broadcast_checkin(callback: CallbackQuery, session: AsyncSession) -
         return
     await safe_answer(callback)
 
-    from datetime import date as date_cls
-    from database.models import SessionLog
     from services.session_log_service import SessionLogService
 
     user_svc = UserService(session)
@@ -179,16 +171,11 @@ async def cb_broadcast_checkin(callback: CallbackQuery, session: AsyncSession) -
         if not day:
             skipped += 1
             continue
-        # Ensure today's log exists
         await log_svc.get_or_create_today(user.telegram_id, day)
         try:
             await callback.bot.send_message(
                 chat_id=user.telegram_id,
-                text=(
-                    "🌅 Доброе утро!\n\n"
-                    "Время пройти утренний чек-ин и узнать свою тренировку на сегодня.\n\n"
-                    "Нажми /checkin или кнопку ниже 👇"
-                ),
+                text=T.scheduler.morning_reminder,
                 reply_markup=kb_main_menu(),
             )
             sent += 1
@@ -197,8 +184,7 @@ async def cb_broadcast_checkin(callback: CallbackQuery, session: AsyncSession) -
 
     logger.info("Admin %s broadcast checkin: sent=%s skipped=%s", callback.from_user.id, sent, skipped)
     await callback.message.answer(
-        f"✅ Чек-ин отправлен: <b>{sent}</b> пользователей\n"
-        f"Пропущено (заблокировали бот или нет дня): <b>{skipped}</b>",
+        T.admin.broadcast_result.format(sent=sent, skipped=skipped),
         parse_mode="HTML",
         reply_markup=kb_admin_menu(),
     )
@@ -222,11 +208,11 @@ async def cb_admin_reports(callback: CallbackQuery, session: AsyncSession) -> No
     users = list(result.scalars().all())
 
     if not users:
-        await callback.message.answer("Нет активных пользователей.", reply_markup=kb_admin_menu())
+        await callback.message.answer(T.admin.no_active_users, reply_markup=kb_admin_menu())
         return
 
     await callback.message.answer(
-        f"📋 <b>Отчёты</b>\n\nВыбери пользователя ({len(users)}):",
+        T.admin.reports_header.format(count=len(users)),
         parse_mode="HTML",
         reply_markup=kb_admin_report_users(users),
     )
@@ -262,7 +248,7 @@ async def _send_report(message, session: AsyncSession, user_id: int, as_file: bo
     user_svc = UserService(session)
     user = await user_svc.get(user_id)
     if not user:
-        await message.answer("Пользователь не найден.")
+        await message.answer(T.admin.user_not_found)
         return
 
     result = await session.execute(
@@ -273,19 +259,19 @@ async def _send_report(message, session: AsyncSession, user_id: int, as_file: bo
     )
     rows = result.all()
 
-    WELLBEING = {1: "Плохо", 2: "Тяжеловато", 3: "Нормально", 4: "Отлично"}
-    SLEEP = {1: "Плохо", 2: "Нормально", 3: "Хорошо"}
-    PAIN = {1: "Нет", 2: "Немного", 3: "Есть"}
-    STATUS = {"done": "✅ Выполнено", "partial": "⚡ Частично", "skipped": "❌ Пропущено"}
-    VERSION = {"base": "Base", "light": "Light", "recovery": "Recovery"}
-    DAY_TYPE = {"run": "Бег", "strength": "Силовая", "recovery": "Восстановление", "rest": "Отдых"}
+    WELLBEING = T.admin.wellbeing_labels
+    SLEEP     = T.admin.sleep_labels
+    PAIN      = T.admin.pain_labels
+    STATUS    = T.admin.status_labels
+    VERSION   = T.admin.version_labels
+    DAY_TYPE  = T.admin.day_type_labels
 
     level_name = LEVEL_NAMES.get(user.level, "?")
     current_day = await user_svc.current_calendar_day(user) or "?"
 
     if as_file:
         buf = io.StringIO()
-        buf.write("День,Дата,Тип,Режим,Самочувствие,Сон,Боль,Статус\n")
+        buf.write(T.admin.csv_header)
         for log, workout in rows:
             buf.write(",".join([
                 str(user_svc.log_calendar_day(user, log)),
@@ -305,29 +291,27 @@ async def _send_report(message, session: AsyncSession, user_id: int, as_file: bo
         )
         await message.answer_document(
             file,
-            caption=f"📥 Отчёт: {user.full_name}",
+            caption=T.admin.report_caption.format(name=user.full_name),
         )
         return
 
-    # Text view
     if not rows:
         await message.answer(
-            f"По пользователю <b>{user.full_name}</b> данных нет.",
+            T.admin.report_no_data.format(name=user.full_name),
             parse_mode="HTML",
             reply_markup=kb_admin_menu(),
         )
         return
 
-    lines = [f"📋 <b>{user.full_name}</b> | {level_name} | День {current_day}/28\n"]
+    lines = [T.admin.report_header.format(name=user.full_name, level_name=level_name, day=current_day)]
     for log, workout in rows:
         day_type = DAY_TYPE.get(workout.day_type, "—") if workout else "—"
-        version = VERSION.get(log.assigned_version, "—") if log.assigned_version else "—"
-        status = STATUS.get(log.completion_status, "—") if log.completion_status else "—"
-        cal_day = user_svc.log_calendar_day(user, log)
+        version  = VERSION.get(log.assigned_version, "—") if log.assigned_version else "—"
+        status   = STATUS.get(log.completion_status, "—") if log.completion_status else "—"
+        cal_day  = user_svc.log_calendar_day(user, log)
         lines.append(f"День {cal_day:>2} | {day_type:<14} | {version:<8} | {status}")
 
     text = "\n".join(lines)
-    # Split if too long
     chunks = [text[i:i+3800] for i in range(0, len(text), 3800)]
     for i, chunk in enumerate(chunks):
         await message.answer(
@@ -350,16 +334,21 @@ async def cb_admin_manage(callback: CallbackQuery, session: AsyncSession) -> Non
     user_svc = UserService(session)
     user = await user_svc.get(user_id)
     if not user:
-        await callback.message.answer("Пользователь не найден.")
+        await callback.message.answer(T.admin.user_not_found)
         return
 
     current_day = await user_svc.current_calendar_day(user) or "?"
     level_name = LEVEL_NAMES.get(user.level, "?")
     max_day = 35 if getattr(user, "extended_week5", False) else 28
-    week5_status = " | 📅 5-я неделя" if getattr(user, "extended_week5", False) else ""
+    week5_status = T.admin.week5_label if getattr(user, "extended_week5", False) else ""
     await callback.message.answer(
-        f"⚙️ <b>{user.full_name}</b>\n"
-        f"Уровень: {level_name} | День: {current_day}/{max_day}{week5_status}",
+        T.admin.manage_header.format(
+            name=user.full_name,
+            level_name=level_name,
+            day=current_day,
+            max_day=max_day,
+            week5_status=week5_status,
+        ),
         parse_mode="HTML",
         reply_markup=kb_admin_manage(user_id, extended=getattr(user, "extended_week5", False)),
     )
@@ -374,8 +363,6 @@ async def cb_admin_extend_week5(callback: CallbackQuery, session: AsyncSession) 
     await safe_answer(callback)
 
     parts = callback.data.split(":")
-    # adm:extend:<user_id>  → activate
-    # adm:extend:off:<user_id> → deactivate
     if parts[2] == "off":
         user_id = int(parts[3])
         activate = False
@@ -386,14 +373,14 @@ async def cb_admin_extend_week5(callback: CallbackQuery, session: AsyncSession) 
     user_svc = UserService(session)
     user = await user_svc.get(user_id)
     if not user:
-        await callback.message.answer("Пользователь не найден.")
+        await callback.message.answer(T.admin.user_not_found)
         return
 
     await user_svc.update(user, extended_week5=activate)
 
-    status_text = "✅ 5-я неделя активирована" if activate else "❌ 5-я неделя отключена"
+    status_text = T.admin.week5_activated if activate else T.admin.week5_disabled
     await callback.message.answer(
-        f"{status_text} для <b>{user.full_name}</b>",
+        T.admin.week5_for_user.format(status=status_text, name=user.full_name),
         parse_mode="HTML",
         reply_markup=kb_admin_manage(user_id, extended=activate),
     )
@@ -408,10 +395,7 @@ async def cb_admin_mode_picker(callback: CallbackQuery) -> None:
     await safe_answer(callback)
 
     user_id = int(callback.data.split(":")[2])
-    await callback.message.answer(
-        "Выбери режим на сегодня:",
-        reply_markup=kb_admin_day_mode(user_id),
-    )
+    await callback.message.answer(T.admin.choose_mode, reply_markup=kb_admin_day_mode(user_id))
 
 
 @router.callback_query(F.data.startswith("adm:ca:"))
@@ -422,7 +406,6 @@ async def cb_checkin_approve(callback: CallbackQuery, session: AsyncSession) -> 
         return
 
     parts = callback.data.split(":")
-    # adm:ca:<user_id>:<version>
     user_id, version = int(parts[2]), parts[3]
     await safe_answer(callback)
 
@@ -441,11 +424,11 @@ async def cb_checkin_approve(callback: CallbackQuery, session: AsyncSession) -> 
     )
     log = result.scalar_one_or_none()
     if not log:
-        await callback.message.answer("Лог на сегодня не найден.")
+        await callback.message.answer(T.admin.log_not_found)
         return
 
     if not log.approval_pending:
-        await callback.message.answer("Тренировка уже была отправлена этому пользователю.")
+        await callback.message.answer(T.admin.already_sent)
         return
 
     log_svc = SessionLogService(session)
@@ -459,10 +442,10 @@ async def cb_checkin_approve(callback: CallbackQuery, session: AsyncSession) -> 
         await log_svc.update(log, assigned_version="rest", approval_pending=False)
         await callback.bot.send_message(
             chat_id=user_id,
-            text="😴 Сегодня день отдыха. Позволь телу восстановиться.",
+            text=T.checkin.rest_day,
             reply_markup=kb_main_menu(),
         )
-        version_label = "Отдых"
+        version_label = T.admin.version_labels.get("rest", "rest")
     else:
         workout = await wk_svc.get(
             user.level, log.day_index, version,
@@ -475,11 +458,11 @@ async def cb_checkin_approve(callback: CallbackQuery, session: AsyncSession) -> 
                 workout, day_type, version, user.strength_format, user.level,
                 calendar_day=user_svc.log_calendar_day(user, log),
             )
-        version_label = {"base": "Base", "light": "Light", "recovery": "Recovery"}.get(version, version)
+        version_label = T.admin.version_labels.get(version, version)
 
     logger.info("Admin %s approved checkin for user %s → %s", callback.from_user.id, user_id, version)
     await callback.message.edit_reply_markup()
-    await callback.message.answer(f"✅ Отправлено: {version_label} → {user.full_name}")
+    await callback.message.answer(T.admin.sent_ok.format(version_label=version_label, name=user.full_name))
 
 
 @router.callback_query(F.data.startswith("adm:mode:set:"))
@@ -489,7 +472,6 @@ async def cb_admin_mode_set(callback: CallbackQuery, session: AsyncSession) -> N
         return
 
     parts = callback.data.split(":")
-    # adm:mode:set:<user_id>:<version>
     user_id, version = int(parts[3]), parts[4]
     await safe_answer(callback)
 
@@ -500,6 +482,7 @@ async def cb_admin_mode_set(callback: CallbackQuery, session: AsyncSession) -> N
     from services.workout_service import WorkoutService
     from handlers.utils import filter_strength_text, get_tip_lines
     from keyboards.builders import kb_completion, kb_completion_strength
+    from texts import T as _T  # re-import to avoid UnboundLocalError
 
     result = await session.execute(
         select(SessionLog).where(
@@ -509,16 +492,22 @@ async def cb_admin_mode_set(callback: CallbackQuery, session: AsyncSession) -> N
     )
     log = result.scalar_one_or_none()
     if not log:
-        await callback.message.answer("Лог на сегодня не найден. Пользователь ещё не начал день.")
+        await callback.message.answer(T.admin.log_not_found_no_day)
         return
 
     log.assigned_version = version
     await session.commit()
 
-    version_names = {"base": "Base (полная)", "light": "Light (лёгкая)", "recovery": "Recovery (восстановление)"}
-    await callback.message.answer(f"✅ Режим изменён на <b>{version_names[version]}</b>.", parse_mode="HTML")
+    version_names = {
+        "base":     _T.btn.adm_mode_base,
+        "light":    _T.btn.adm_mode_light,
+        "recovery": _T.btn.adm_mode_recovery,
+    }
+    await callback.message.answer(
+        T.admin.mode_changed.format(mode=version_names.get(version, version)),
+        parse_mode="HTML",
+    )
 
-    # Fetch the actual workout for the new version and send it to the user
     try:
         user_svc = UserService(session)
         wk_svc = WorkoutService(session)
@@ -533,8 +522,7 @@ async def cb_admin_mode_set(callback: CallbackQuery, session: AsyncSession) -> N
 
         await callback.bot.send_message(
             chat_id=user_id,
-            text=f"🔄 Тренер скорректировал твою тренировку на сегодня.\n\n"
-                 f"Новый режим: <b>{version_names[version]}</b>",
+            text=T.admin.mode_correction.format(mode=version_names.get(version, version)),
             parse_mode="HTML",
         )
 
@@ -547,9 +535,10 @@ async def cb_admin_mode_set(callback: CallbackQuery, session: AsyncSession) -> N
             tips = get_tip_lines(user.level, day_index)
             tips_block = f"\n\n{tips}" if tips else ""
             calendar_day = user_svc.log_calendar_day(user, log)
+            from texts import T as _T2
             await callback.bot.send_message(
                 chat_id=user_id,
-                text=f"📋 <b>День {calendar_day} из 28 — {workout.title}</b>{tips_block}\n\n{workout_text}",
+                text=_T2.checkin.workout_header.format(calendar_day=calendar_day, title=workout.title) + tips_block + f"\n\n{workout_text}",
                 parse_mode="HTML",
                 reply_markup=kb_completion_strength() if is_strength else kb_completion(),
             )
@@ -567,7 +556,7 @@ async def cb_admin_jump(callback: CallbackQuery, state: FSMContext) -> None:
     user_id = int(callback.data.split(":")[2])
     await state.set_state(AdminActionStates.jump_day)
     await state.update_data(target_user_id=user_id)
-    await callback.message.answer("Введи номер дня (1–28) куда перенести пользователя:")
+    await callback.message.answer(T.admin.jump_ask_day)
 
 
 @router.message(AdminActionStates.jump_day)
@@ -582,7 +571,7 @@ async def admin_jump_day_input(message: Message, state: FSMContext, session: Asy
         target_day = int(message.text.strip())
         assert 1 <= target_day <= 28
     except Exception:
-        await message.answer("Введи число от 1 до 28.")
+        await message.answer(T.admin.jump_invalid)
         return
 
     await state.clear()
@@ -591,13 +580,12 @@ async def admin_jump_day_input(message: Message, state: FSMContext, session: Asy
     user_svc = UserService(session)
     user = await user_svc.get(target_user_id)
     if not user:
-        await message.answer("Пользователь не найден.")
+        await message.answer(T.admin.user_not_found)
         return
 
     new_start = date.today() - timedelta(days=target_day - 1)
     await user_svc.update(user, program_start_date=new_start, week_repeat_count=0)
 
-    # Delete today's SessionLog so the next checkin creates a fresh one with the correct day_index
     from database.models import SessionLog
     await session.execute(
         delete(SessionLog).where(
@@ -608,12 +596,12 @@ async def admin_jump_day_input(message: Message, state: FSMContext, session: Asy
     await session.commit()
     logger.info("Admin %s jumped user %s to day %s; deleted today's SessionLog", message.from_user.id, target_user_id, target_day)
 
-    await message.answer(f"✅ Пользователь переведён на <b>день {target_day}</b>.", parse_mode="HTML")
+    await message.answer(T.admin.jump_done_admin.format(day=target_day), parse_mode="HTML")
 
     try:
         await message.bot.send_message(
             chat_id=target_user_id,
-            text=f"📅 Тренер скорректировал твой прогресс.\n\nСегодня у тебя <b>день {target_day}</b>.",
+            text=T.admin.jump_done_user.format(day=target_day),
             parse_mode="HTML",
         )
     except Exception:
@@ -630,7 +618,7 @@ async def cb_admin_send_msg(callback: CallbackQuery, state: FSMContext) -> None:
     user_id = int(callback.data.split(":")[2])
     await state.set_state(AdminActionStates.send_msg)
     await state.update_data(target_user_id=user_id)
-    await callback.message.answer("Напиши сообщение для пользователя:")
+    await callback.message.answer(T.admin.ask_message)
 
 
 @router.message(AdminActionStates.send_msg)
@@ -645,12 +633,12 @@ async def admin_send_msg_input(message: Message, state: FSMContext) -> None:
     try:
         await message.bot.send_message(
             chat_id=target_user_id,
-            text=f"💬 <b>Сообщение от тренера:</b>\n\n{message.text}",
+            text=T.admin.message_to_user.format(text=message.text),
             parse_mode="HTML",
         )
-        await message.answer("✅ Сообщение отправлено.")
+        await message.answer(T.admin.message_sent)
     except Exception as e:
-        await message.answer(f"❌ Не удалось отправить: {e}")
+        await message.answer(T.admin.message_failed.format(error=e))
 
 
 @router.callback_query(F.data == "adm:menu:whitelist")
@@ -664,19 +652,15 @@ async def cb_admin_whitelist(callback: CallbackQuery, session: AsyncSession) -> 
     entries = await wl_svc.list_all()
 
     if not entries:
-        await callback.message.answer("Whitelist пуст.", reply_markup=kb_admin_menu())
+        await callback.message.answer(T.admin.whitelist_empty, reply_markup=kb_admin_menu())
         return
 
-    lines = [f"<b>Whitelist ({len(entries)} пользователей):</b>\n"]
+    lines = [T.admin.whitelist_header.format(count=len(entries))]
     for e in entries:
         note = f" — {e.note}" if e.note else ""
         lines.append(f"• <code>{e.telegram_id}</code>{note}")
 
-    await callback.message.answer(
-        "\n".join(lines),
-        parse_mode="HTML",
-        reply_markup=kb_admin_menu(),
-    )
+    await callback.message.answer("\n".join(lines), parse_mode="HTML", reply_markup=kb_admin_menu())
 
 
 # ── Application approve / reject ──────────────────────────────────────────────
@@ -691,13 +675,13 @@ async def cb_app_approve(callback: CallbackQuery, session: AsyncSession) -> None
     wl_svc = WhitelistService(session)
 
     if await wl_svc.is_allowed(user_id):
-        await safe_answer(callback, text="Уже в whitelist.", show_alert=True)
+        await safe_answer(callback, text=T.admin.already_whitelist, show_alert=True)
         return
 
     await wl_svc.add(telegram_id=user_id, added_by=callback.from_user.id, note="заявка")
     await callback.message.edit_reply_markup()
     await callback.message.edit_text(
-        callback.message.text + "\n\n✅ <b>Одобрено</b>",
+        callback.message.text + "\n\n" + T.admin.approved_label,
         parse_mode="HTML",
     )
     await safe_answer(callback)
@@ -705,10 +689,7 @@ async def cb_app_approve(callback: CallbackQuery, session: AsyncSession) -> None
     try:
         await callback.bot.send_message(
             chat_id=user_id,
-            text=(
-                "🎉 <b>Твоя заявка одобрена!</b>\n\n"
-                "Добро пожаловать в программу! Нажми /start чтобы начать."
-            ),
+            text=T.admin.application_approved,
             parse_mode="HTML",
         )
     except Exception:
@@ -724,19 +705,13 @@ async def cb_app_reject(callback: CallbackQuery) -> None:
     user_id = int(callback.data.split(":")[3])
     await callback.message.edit_reply_markup()
     await callback.message.edit_text(
-        callback.message.text + "\n\n❌ <b>Отклонено</b>",
+        callback.message.text + "\n\n" + T.admin.rejected_label,
         parse_mode="HTML",
     )
     await safe_answer(callback)
 
     try:
-        await callback.bot.send_message(
-            chat_id=user_id,
-            text=(
-                "😔 К сожалению, твоя заявка не была одобрена.\n\n"
-                "Если считаешь это ошибкой — обратись к тренеру напрямую."
-            ),
-        )
+        await callback.bot.send_message(chat_id=user_id, text=T.admin.application_rejected)
     except Exception:
         pass
 
@@ -763,20 +738,20 @@ async def cb_admin_mark_day(callback: CallbackQuery, session: AsyncSession) -> N
 
     user = await user_svc.get(user_id)
     if not user:
-        await callback.message.answer("Пользователь не найден.")
+        await callback.message.answer(T.admin.user_not_found)
         return
 
     logs = await log_svc.get_unmarked_past(user_id)
     if not logs:
         await callback.message.answer(
-            f"✅ У <b>{user.full_name}</b> нет неотмеченных тренировок.",
+            T.admin.no_unmarked.format(name=user.full_name),
             parse_mode="HTML",
             reply_markup=kb_admin_manage(user_id),
         )
         return
 
     await callback.message.answer(
-        f"📝 <b>{user.full_name}</b> — выбери день для отметки:",
+        T.admin.pick_day.format(name=user.full_name),
         parse_mode="HTML",
         reply_markup=kb_admin_mark_day_picker(user_id, logs),
     )
@@ -793,7 +768,7 @@ async def cb_admin_mark_day_pick(callback: CallbackQuery) -> None:
     parts = callback.data.split(":")  # adm:markday:day:<user_id>:<day_index>
     user_id, day_index = int(parts[3]), int(parts[4])
     await callback.message.answer(
-        f"Выбери статус для <b>дня {day_index}</b>:",
+        T.admin.pick_status.format(day=day_index),
         parse_mode="HTML",
         reply_markup=kb_admin_mark_day_status(user_id, day_index),
     )
@@ -821,16 +796,15 @@ async def cb_admin_mark_day_set(callback: CallbackQuery, session: AsyncSession) 
     )
     log = result.scalar_one_or_none()
     if not log:
-        await callback.message.answer("Лог не найден.", reply_markup=kb_admin_manage(user_id))
+        await callback.message.answer(T.admin.log_not_found_generic, reply_markup=kb_admin_manage(user_id))
         return
 
     log.completion_status = status
     await session.commit()
 
-    STATUS_LABELS = {"done": "✅ Выполнено", "partial": "⚡ Частично", "skipped": "❌ Пропущено"}
     logger.info("Admin %s marked user %s day %s as %s", callback.from_user.id, user_id, day_index, status)
     await callback.message.answer(
-        f"День <b>{day_index}</b> отмечен как <b>{STATUS_LABELS[status]}</b>.",
+        T.admin.day_marked.format(day=day_index, status=T.admin.status_labels.get(status, status)),
         parse_mode="HTML",
         reply_markup=kb_admin_manage(user_id),
     )
@@ -845,24 +819,24 @@ async def cmd_add_user(message: Message, session: AsyncSession) -> None:
 
     parts = message.text.split(maxsplit=2)
     if len(parts) < 2:
-        await message.answer("Использование: /add_user <telegram_id> [заметка]")
+        await message.answer(T.admin.cmd_add_user_usage)
         return
 
     try:
         target_id = int(parts[1])
     except ValueError:
-        await message.answer("Telegram ID должен быть числом.")
+        await message.answer(T.admin.cmd_id_not_number)
         return
 
     note = parts[2] if len(parts) == 3 else None
     svc = WhitelistService(session)
 
     if await svc.is_allowed(target_id):
-        await message.answer(f"Пользователь {target_id} уже в списке.")
+        await message.answer(T.admin.user_in_whitelist.format(user_id=target_id))
         return
 
     await svc.add(telegram_id=target_id, added_by=message.from_user.id, note=note)
-    await message.answer(f"✅ Пользователь {target_id} добавлен в whitelist.")
+    await message.answer(T.admin.user_added_whitelist.format(user_id=target_id))
 
 
 @router.message(Command("remove_user"))
@@ -872,21 +846,21 @@ async def cmd_remove_user(message: Message, session: AsyncSession) -> None:
 
     parts = message.text.split()
     if len(parts) < 2:
-        await message.answer("Использование: /remove_user <telegram_id>")
+        await message.answer(T.admin.cmd_remove_user_usage)
         return
 
     try:
         target_id = int(parts[1])
     except ValueError:
-        await message.answer("Telegram ID должен быть числом.")
+        await message.answer(T.admin.cmd_id_not_number)
         return
 
     svc = WhitelistService(session)
     removed = await svc.remove(target_id)
     if removed:
-        await message.answer(f"✅ Пользователь {target_id} удалён из whitelist.")
+        await message.answer(T.admin.user_removed_whitelist.format(user_id=target_id))
     else:
-        await message.answer(f"Пользователь {target_id} не найден в whitelist.")
+        await message.answer(T.admin.user_not_in_whitelist.format(user_id=target_id))
 
 
 @router.message(Command("list_users"))
@@ -898,10 +872,10 @@ async def cmd_list_users(message: Message, session: AsyncSession) -> None:
     entries = await wl_svc.list_all()
 
     if not entries:
-        await message.answer("Whitelist пуст.")
+        await message.answer(T.admin.whitelist_empty)
         return
 
-    lines = [f"<b>Whitelist ({len(entries)} пользователей):</b>\n"]
+    lines = [T.admin.whitelist_header.format(count=len(entries))]
     for e in entries:
         note = f" — {e.note}" if e.note else ""
         lines.append(f"• <code>{e.telegram_id}</code>{note}")
@@ -926,12 +900,10 @@ async def cmd_stats(message: Message, session: AsyncSession) -> None:
         f"  Level {lvl} ({name}): {level_counts[lvl]}"
         for lvl, name in LEVEL_NAMES.items()
     )
-    text = (
-        f"<b>Статистика бота</b>\n\n"
-        f"Активных пользователей: <b>{len(users)}</b>\n\n"
-        f"По уровням:\n{level_lines}\n"
+    await message.answer(
+        T.admin.stats_text.format(count=len(users), level_lines=level_lines),
+        parse_mode="HTML",
     )
-    await message.answer(text, parse_mode="HTML")
 
 
 # ── Pending users list ─────────────────────────────────────────────────────────
@@ -951,7 +923,7 @@ async def cmd_pending(message: Message, session: AsyncSession) -> None:
     users = list(result.scalars().all())
 
     if not users:
-        await message.answer("Нет пользователей, ожидающих подтверждения.")
+        await message.answer(T.admin.no_pending_users)
         return
 
     for u in users:
@@ -961,11 +933,7 @@ async def cmd_pending(message: Message, session: AsyncSession) -> None:
             f"ID: <code>{u.telegram_id}</code>\n"
             f"Уровень: <b>{level_name} ({u.level})</b>"
         )
-        await message.answer(
-            text,
-            parse_mode="HTML",
-            reply_markup=kb_admin_approve(u.telegram_id, u.level),
-        )
+        await message.answer(text, parse_mode="HTML", reply_markup=kb_admin_approve(u.telegram_id, u.level))
 
 
 # ── Reset user progress ────────────────────────────────────────────────────────
@@ -978,41 +946,31 @@ async def cmd_reset_user(message: Message, session: AsyncSession) -> None:
 
     parts = message.text.split()
     if len(parts) < 2:
-        await message.answer("Использование: /reset_user <telegram_id>")
+        await message.answer(T.admin.cmd_reset_user_usage)
         return
 
     try:
         target_id = int(parts[1])
     except ValueError:
-        await message.answer("Telegram ID должен быть числом.")
+        await message.answer(T.admin.cmd_id_not_number)
         return
 
     user_svc = UserService(session)
     user = await user_svc.get(target_id)
     if not user:
-        await message.answer(f"Пользователь {target_id} не найден.")
+        await message.answer(T.admin.user_not_found_id.format(user_id=target_id))
         return
 
     await user_svc.reset_progress(user)
-    await message.answer(
-        f"✅ Прогресс пользователя <code>{target_id}</code> сброшен.\n"
-        f"Онбординг будет пройден заново при следующем /start.",
-        parse_mode="HTML",
-    )
+    await message.answer(T.admin.progress_reset_admin.format(user_id=target_id), parse_mode="HTML")
 
     try:
-        await message.bot.send_message(
-            chat_id=target_id,
-            text=(
-                "🔄 Тренер сбросил твой прогресс.\n\n"
-                "Напиши /start чтобы пройти анкету заново."
-            ),
-        )
+        await message.bot.send_message(chat_id=target_id, text=T.admin.progress_reset_user)
     except Exception:
         pass
 
 
-# ── Level change command (admin can adjust active user's level anytime) ────────
+# ── Level change command ────────────────────────────────────────────────────────
 
 @router.message(Command("set_level"))
 async def cmd_set_level(message: Message, session: AsyncSession) -> None:
@@ -1022,7 +980,7 @@ async def cmd_set_level(message: Message, session: AsyncSession) -> None:
 
     parts = message.text.split()
     if len(parts) < 3:
-        await message.answer("Использование: /set_level <telegram_id> <уровень 1-5>")
+        await message.answer(T.admin.cmd_set_level_usage)
         return
 
     try:
@@ -1030,21 +988,20 @@ async def cmd_set_level(message: Message, session: AsyncSession) -> None:
         new_level = int(parts[2])
         assert 1 <= new_level <= 5
     except Exception:
-        await message.answer("Неверные аргументы. Пример: /set_level 123456 3")
+        await message.answer(T.admin.cmd_set_level_invalid)
         return
 
     user_svc = UserService(session)
     user = await user_svc.get(target_id)
     if not user:
-        await message.answer(f"Пользователь {target_id} не найден.")
+        await message.answer(T.admin.user_not_found_id.format(user_id=target_id))
         return
 
     await user_svc.update(user, level=new_level)
     level_name = LEVEL_NAMES[new_level]
     logger.info("Admin %s set user %s to level=%s (%s)", message.from_user.id, target_id, new_level, level_name)
     await message.answer(
-        f"✅ Уровень пользователя <code>{target_id}</code> изменён на "
-        f"<b>{level_name} ({new_level})</b>.",
+        T.admin.level_set.format(user_id=target_id, level_name=level_name, level=new_level),
         parse_mode="HTML",
     )
 
@@ -1064,11 +1021,11 @@ async def _activate_user(
     user = await user_svc.get(user_id)
 
     if not user:
-        await safe_answer(callback, text="Пользователь не найден.", show_alert=True)
+        await safe_answer(callback, text=T.admin.user_not_found, show_alert=True)
         return
 
     if user.status == "active":
-        await safe_answer(callback, text="Уже активирован.", show_alert=True)
+        await safe_answer(callback, text=T.admin.already_active, show_alert=True)
         return
 
     start_date = date.today() if start_today else date.today() + timedelta(days=1)
@@ -1088,23 +1045,20 @@ async def _activate_user(
         logger.info("Admin %s activated user %s (start tomorrow, level=%s)", callback.from_user.id, user_id, level)
 
     level_name = LEVEL_NAMES[level]
-    start_label = "сегодня" if start_today else "завтра"
+    start_label = T.admin.start_today_word if start_today else T.admin.start_tomorrow_word
 
     await callback.message.edit_text(
-        callback.message.text + f"\n\n✅ <b>Активирован. Уровень: {level_name} ({level}). Старт: {start_label}</b>",
+        callback.message.text + f"\n\n" + T.admin.activated_label.format(
+            level_name=level_name, level=level, start_label=start_label
+        ),
         parse_mode="HTML",
         reply_markup=None,
     )
     await safe_answer(callback)
 
-    user_text = (
-        f"🎉 <b>Тренер подтвердил твой уровень!</b>\n\n"
-        f"Твой уровень: <b>{level_name}</b>\n"
-        f"Программа стартует <b>{start_label}</b>!\n\n"
-        f"Каждое утро я буду спрашивать о самочувствии и показывать тренировку."
-    )
+    user_text = T.admin.user_activated_msg.format(level_name=level_name, start_label=start_label)
     if start_today:
-        user_text += "\n\nНачинай прямо сейчас 👇"
+        user_text += T.admin.user_activated_today_suffix
     try:
         await callback.bot.send_message(
             chat_id=user_id,
@@ -1124,7 +1078,6 @@ async def cb_approve(callback: CallbackQuery, session: AsyncSession) -> None:
         return
 
     parts = callback.data.split(":")
-    # parts: ['adm', 'approve', 'today'/'tomorrow', user_id, level]
     start_today = parts[2] == "today"
     user_id, level = int(parts[3]), int(parts[4])
     await _activate_user(callback, session, user_id, level, start_today)
@@ -1139,10 +1092,7 @@ async def cb_pick_level(callback: CallbackQuery) -> None:
 
     user_id = int(callback.data.split(":")[2])
     await safe_answer(callback)
-    await callback.message.answer(
-        "Выбери уровень для этого пользователя:",
-        reply_markup=kb_admin_level_picker(user_id),
-    )
+    await callback.message.answer(T.admin.choose_level, reply_markup=kb_admin_level_picker(user_id))
 
 
 @router.callback_query(F.data.startswith("adm:setlvl:"))
@@ -1156,7 +1106,7 @@ async def cb_set_level_callback(callback: CallbackQuery) -> None:
     level_name = LEVEL_NAMES[int(level_str)]
     await safe_answer(callback)
     await callback.message.answer(
-        f"Уровень: <b>{level_name} ({level_str})</b>. Когда начинаем?",
+        T.admin.level_chosen.format(level_name=level_name, level=level_str),
         parse_mode="HTML",
         reply_markup=kb_admin_start_choice(int(user_id_str), int(level_str)),
     )

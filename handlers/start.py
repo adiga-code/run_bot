@@ -11,6 +11,7 @@ from handlers.utils import safe_answer
 from keyboards.builders import kb_apply, kb_admin_application, kb_main_menu
 from services.user_service import UserService
 from services.whitelist_service import WhitelistService
+from texts import T
 
 router = Router()
 
@@ -28,12 +29,7 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession) 
 
     if not is_admin and not await wl_svc.is_allowed(user_id):
         await state.clear()
-        await message.answer(
-            "👋 Привет!\n\n"
-            "Этот бот доступен только участникам беговой программы.\n\n"
-            "Хочешь присоединиться? Подай заявку — тренер рассмотрит её и даст доступ 👇",
-            reply_markup=kb_apply(),
-        )
+        await message.answer(T.start.not_allowed, reply_markup=kb_apply())
         return
 
     user_svc = UserService(session)
@@ -44,18 +40,11 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession) 
 
     if created or not user.onboarding_complete:
         await state.set_state(OnboardingStates.last_name)
-        await message.answer(
-            "👋 Привет! Я твой беговой помощник на 28 дней.\n\n"
-            "Давай познакомимся и подберём программу под тебя.\n"
-            "Это займёт около 3 минут.\n\n"
-            "Введи свою <b>фамилию</b>:",
-            parse_mode="HTML",
-        )
+        await message.answer(T.start.onboarding_intro, parse_mode="HTML")
         return
 
     await message.answer(
-        f"С возвращением, {user.full_name.split()[0]}! 👋\n\n"
-        "Что делаем сегодня?",
+        T.start.welcome_back.format(name=user.full_name.split()[0]),
         reply_markup=kb_main_menu(),
     )
 
@@ -66,17 +55,14 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession) 
 async def cb_apply_start(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await state.set_state(ApplicationStates.waiting_name)
-    await callback.message.answer(
-        "Напиши своё <b>имя и фамилию</b> — тренер увидит их в заявке:",
-        parse_mode="HTML",
-    )
+    await callback.message.answer(T.start.ask_app_name, parse_mode="HTML")
 
 
 @router.message(ApplicationStates.waiting_name)
 async def apply_name(message: Message, state: FSMContext, session: AsyncSession) -> None:
     name = message.text.strip()
     if len(name) < 2:
-        await message.answer("Пожалуйста, введи настоящее имя.")
+        await message.answer(T.start.err_name)
         return
 
     await state.clear()
@@ -90,12 +76,7 @@ async def apply_name(message: Message, state: FSMContext, session: AsyncSession)
     user_id = message.from_user.id
     tg_link = f"@{message.from_user.username}" if message.from_user.username else f"id:{user_id}"
 
-    admin_text = (
-        f"📝 <b>Новая заявка на участие!</b>\n\n"
-        f"Имя: <b>{name}</b>\n"
-        f"Telegram: {tg_link}\n"
-        f"ID: <code>{user_id}</code>"
-    )
+    admin_text = T.start.admin_new_app.format(name=name, tg_link=tg_link, user_id=user_id)
 
     sent = False
     for admin_id in settings.admin_ids:
@@ -111,12 +92,6 @@ async def apply_name(message: Message, state: FSMContext, session: AsyncSession)
             pass
 
     if sent:
-        await message.answer(
-            "✅ <b>Заявка отправлена!</b>\n\n"
-            "Тренер рассмотрит её и даст тебе доступ. Ожидай сообщения от бота.",
-            parse_mode="HTML",
-        )
+        await message.answer(T.start.application_sent, parse_mode="HTML")
     else:
-        await message.answer(
-            "⚠️ Не удалось отправить заявку. Обратитесь к тренеру напрямую."
-        )
+        await message.answer(T.start.application_failed)

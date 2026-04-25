@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from data.interpretations import get_interpretation
+from texts import T
 from engine.red_flags import CheckinData
 from engine.rule_engine import decide_workout_version
 from keyboards.builders import (
@@ -23,13 +24,13 @@ from services.workout_service import WorkoutService
 
 logger = logging.getLogger(__name__)
 
-_WELLBEING_LABELS = {1: "плохо", 2: "тяжеловато", 3: "нормально", 4: "хорошо", 5: "отлично"}
-_SLEEP_LABELS    = {1: "плохо", 2: "нормально", 3: "хорошо"}
-_PAIN_LABELS     = {1: "нет", 2: "немного", 3: "есть"}
-_STRESS_LABELS   = {1: "нет", 2: "умеренный", 3: "сильный"}
-_VERSION_LABELS  = {"base": "Base (полная)", "light": "Light (лёгкая)", "recovery": "Recovery", "rest": "Отдых"}
-_PAIN_HIST       = {1: "нет", 2: "немного", 3: "есть"}
-_WELLBEING_HIST  = {1: "плохо", 2: "тяжел.", 3: "норм.", 4: "хорошо", 5: "отлично"}
+_WELLBEING_LABELS = T.checkin.wellbeing_labels
+_SLEEP_LABELS     = T.checkin.sleep_labels
+_PAIN_LABELS      = T.checkin.pain_labels
+_STRESS_LABELS    = T.checkin.stress_labels
+_VERSION_LABELS   = T.checkin.version_labels
+_PAIN_HIST        = T.checkin.pain_hist
+_WELLBEING_HIST   = T.checkin.wellbeing_hist
 
 
 def _build_history_line(recent_logs) -> str:
@@ -40,9 +41,9 @@ def _build_history_line(recent_logs) -> str:
     for log in recent_logs:
         wb = _WELLBEING_HIST.get(log.wellbeing, "?")
         pain = _PAIN_HIST.get(log.pain_level, "?")
-        parts.append(f"сам:{wb} боль:{pain}")
-    return "📊 История (" + " → ".join(parts) + ")"
-_DAY_TYPE_LABELS = {"run": "Бег", "strength": "Силовая", "recovery": "Восстановление", "rest": "Отдых"}
+        parts.append(T.checkin.history_line_fmt.format(wb=wb, pain=pain))
+    return T.checkin.history_header.format(parts=" → ".join(parts))
+_DAY_TYPE_LABELS = T.checkin.day_type_labels
 
 router = Router()
 
@@ -58,7 +59,7 @@ class CheckinStates(StatesGroup):
 
 async def _start_checkin(target, state: FSMContext) -> None:
     await state.set_state(CheckinStates.wellbeing)
-    text = "🌅 <b>Утренний чек-ин</b>\n\nКак твоё самочувствие прямо сейчас?"
+    text = T.checkin.morning_question
     if isinstance(target, CallbackQuery):
         await target.message.answer(text, parse_mode="HTML", reply_markup=kb_wellbeing())
     else:
@@ -75,7 +76,7 @@ async def _check_yesterday_and_start(
     yesterday_log = await log_svc.get_yesterday(user_id)
     if yesterday_log and yesterday_log.completion_status is None:
         await state.set_state(CheckinStates.yesterday)
-        text = "📅 Вчера у тебя была тренировка — ты её выполнил(а)?"
+        text = T.checkin.yesterday_question
         if isinstance(target, Message):
             await target.answer(text, reply_markup=kb_yesterday_completion())
         else:
@@ -89,10 +90,10 @@ async def cmd_checkin(message: Message, state: FSMContext, session: AsyncSession
     user_svc = UserService(session)
     user = await user_svc.get(message.from_user.id)
     if not user or not user.onboarding_complete:
-        await message.answer("Сначала нужно пройти онбординг. Напиши /start")
+        await message.answer(T.checkin.not_onboarded_cmd)
         return
     if user.status != "active":
-        await message.answer("⏳ Ожидаем подтверждения тренера.")
+        await message.answer(T.checkin.pending_trainer_cmd)
         return
 
     log_svc = SessionLogService(session)
@@ -106,14 +107,10 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
     user_svc = UserService(session)
     user = await user_svc.get(callback.from_user.id)
     if not user or not user.onboarding_complete:
-        await safe_answer(callback, text="Сначала пройди онбординг.", show_alert=True)
+        await safe_answer(callback, text=T.checkin.not_onboarded_cb, show_alert=True)
         return
     if user.status != "active":
-        await safe_answer(
-            callback,
-            text="⏳ Ожидаем подтверждения тренера. Как только уровень будет подтверждён — программа начнётся!",
-            show_alert=True,
-        )
+        await safe_answer(callback, text=T.checkin.pending_trainer_cb, show_alert=True)
         return
 
     log_svc = SessionLogService(session)
@@ -126,10 +123,7 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
 
         # Waiting for trainer approval — don't show workout yet
         if log.approval_pending:
-            await callback.message.answer(
-                "⏳ Тренер проверяет твои данные и скоро пришлёт тренировку.",
-                reply_markup=kb_main_menu(),
-            )
+            await callback.message.answer(T.checkin.approval_pending, reply_markup=kb_main_menu())
             return
 
         if log.assigned_workout_id:
@@ -145,7 +139,7 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
                 tips = get_tip_lines(user.level, log.day_index)  # template day for tips
                 tips_block = f"\n\n{tips}" if tips else ""
                 await callback.message.answer(
-                    f"📋 <b>День {calendar_day} из 28 — {workout.title}</b>{tips_block}\n\n{workout_text}",
+                    T.checkin.workout_header.format(calendar_day=calendar_day, title=workout.title) + tips_block + f"\n\n{workout_text}",
                     parse_mode="HTML",
                     reply_markup=(
                         kb_main_menu() if already_marked
@@ -155,7 +149,7 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
                 )
                 return
         await callback.message.answer(
-            "Чек-ин уже сделан. Вечером отметь как прошла тренировка!",
+            T.checkin.checkin_done_msg,
             reply_markup=kb_mark_workout() if log.completion_status is None else kb_main_menu(),
         )
         return
@@ -191,7 +185,7 @@ async def ci_wellbeing(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_reply_markup()
     await safe_answer(callback)
     await state.set_state(CheckinStates.sleep)
-    await callback.message.answer("😴 Как ты спал(а) этой ночью?", reply_markup=kb_sleep())
+    await callback.message.answer(T.checkin.sleep_question, reply_markup=kb_sleep())
 
 
 # ── Sleep ─────────────────────────────────────────────────────────────────────
@@ -203,10 +197,7 @@ async def ci_sleep(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_reply_markup()
     await safe_answer(callback)
     await state.set_state(CheckinStates.pain)
-    await callback.message.answer(
-        "⚡ Есть ли боль или дискомфорт в мышцах / суставах?",
-        reply_markup=kb_pain_checkin(),
-    )
+    await callback.message.answer(T.checkin.pain_question, reply_markup=kb_pain_checkin())
 
 
 # ── Pain ──────────────────────────────────────────────────────────────────────
@@ -220,17 +211,11 @@ async def ci_pain(callback: CallbackQuery, state: FSMContext, session: AsyncSess
 
     if value > 1:
         await state.set_state(CheckinStates.pain_increases)
-        await callback.message.answer(
-            "Усиливается ли боль при нагрузке?",
-            reply_markup=kb_pain_increases_checkin(),
-        )
+        await callback.message.answer(T.checkin.pain_increases_q, reply_markup=kb_pain_increases_checkin())
     else:
         await state.update_data(pain_increases=None)
         await state.set_state(CheckinStates.stress)
-        await callback.message.answer(
-            "😤 Был ли сильный внешний стресс за последние 24 часа?",
-            reply_markup=kb_stress(),
-        )
+        await callback.message.answer(T.checkin.stress_question, reply_markup=kb_stress())
 
 
 # ── Pain increases ────────────────────────────────────────────────────────────
@@ -243,10 +228,7 @@ async def ci_pain_increases(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_reply_markup()
     await safe_answer(callback)
     await state.set_state(CheckinStates.stress)
-    await callback.message.answer(
-        "😤 Был ли сильный внешний стресс за последние 24 часа?",
-        reply_markup=kb_stress(),
-    )
+    await callback.message.answer(T.checkin.stress_question, reply_markup=kb_stress())
 
 
 # ── Stress ────────────────────────────────────────────────────────────────────
@@ -340,9 +322,7 @@ async def _finish_checkin(
     if user_is_admin:
         # Send workout directly — no approval card needed
         if decision.version == "rest" or workout is None:
-            await callback.message.answer(
-                "😴 Сегодня день отдыха.", reply_markup=kb_main_menu()
-            )
+            await callback.message.answer(T.checkin.rest_day, reply_markup=kb_main_menu())
         else:
             await send_workout_to_user(
                 callback.bot, user_id, template_day,
@@ -351,24 +331,22 @@ async def _finish_checkin(
             )
         return
 
-    await callback.message.answer(
-        "⏳ Тренер проверит твои данные и пришлёт тренировку в ближайшее время.",
-        reply_markup=kb_main_menu(),
-    )
+    await callback.message.answer(T.checkin.waiting_trainer, reply_markup=kb_main_menu())
 
     # Build approval card for non-admin athletes
     day_type_label = _DAY_TYPE_LABELS.get(day_type, day_type)
     history_line = _build_history_line(recent_logs) if decision.fatigue_reduction else ""
-    card = (
-        f"👤 <b>{user.full_name}</b> — День {calendar_day} из 28 ({day_type_label})\n"
-        f"Самочувствие: {_WELLBEING_LABELS.get(checkin.wellbeing, '?')} | "
-        f"Сон: {_SLEEP_LABELS.get(checkin.sleep_quality, '?')} | "
-        f"Боль: {_PAIN_LABELS.get(checkin.pain_level, '?')} | "
-        f"Стресс: {_STRESS_LABELS.get(checkin.stress_level, '?')}\n\n"
-        f"🤖 Рекомендация: <b>{_VERSION_LABELS.get(decision.version, decision.version)}</b>\n"
-        f"📝 {decision.reason}"
-        + (f"\n{history_line}" if history_line else "")
-    )
+    card = T.checkin.admin_card.format(
+        name=user.full_name,
+        calendar_day=calendar_day,
+        day_type=day_type_label,
+        wellbeing=_WELLBEING_LABELS.get(checkin.wellbeing, "?"),
+        sleep=_SLEEP_LABELS.get(checkin.sleep_quality, "?"),
+        pain=_PAIN_LABELS.get(checkin.pain_level, "?"),
+        stress=_STRESS_LABELS.get(checkin.stress_level, "?"),
+        version=_VERSION_LABELS.get(decision.version, decision.version),
+        reason=decision.reason,
+    ) + (f"\n{history_line}" if history_line else "")
     for admin_id in settings.admin_ids:
         try:
             await callback.bot.send_message(

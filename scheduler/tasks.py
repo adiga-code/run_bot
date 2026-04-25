@@ -10,6 +10,7 @@ from keyboards.builders import kb_main_menu, kb_mark_workout
 from services.session_log_service import SessionLogService
 from services.user_service import UserService
 from services.workout_service import WorkoutService
+from texts import T
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +46,7 @@ async def _send_morning_reminders(bot: Bot, session_maker: async_sessionmaker[As
             try:
                 await bot.send_message(
                     chat_id=log.user_id,
-                    text=(
-                        "🌅 Доброе утро!\n\n"
-                        "Время пройти утренний чек-ин и узнать свою тренировку на сегодня.\n\n"
-                        "Нажми /checkin или кнопку ниже 👇"
-                    ),
+                    text=T.scheduler.morning_reminder,
                     reply_markup=kb_main_menu(),
                 )
                 await log_svc.update(log, morning_sent=True)
@@ -111,32 +108,17 @@ async def _send_evening_reminders(bot: Bot, session_maker: async_sessionmaker[As
             checkin_done = log.checkin_done
 
             if status == "done":
-                text = (
-                    "🌙 Отличный день!\n\n"
-                    "Тренировка выполнена — это и есть прогресс. "
-                    "Дай телу восстановиться до завтра 💪"
-                )
+                text = T.scheduler.evening_done
                 markup = None
             elif status == "partial":
-                text = (
-                    "🌙 Хорошая работа!\n\n"
-                    "Частичная тренировка — тоже движение вперёд. "
-                    "Завтра продолжаем 🙌"
-                )
+                text = T.scheduler.evening_partial
                 markup = None
             elif checkin_done and not status:
-                text = (
-                    "🌙 Напоминание!\n\n"
-                    "Ты сегодня занимался(ась)? Отметь результат — "
-                    "это помогает отслеживать твой прогресс 👇"
-                )
+                text = T.scheduler.evening_reminder
                 markup = kb_mark_workout()
             else:
                 # No checkin and no status
-                text = (
-                    "🌙 Похоже, сегодня выпал день — ничего страшного.\n\n"
-                    "Завтра возвращаемся в ритм 🙌"
-                )
+                text = T.scheduler.evening_missed
                 markup = None
 
             try:
@@ -171,7 +153,7 @@ async def _auto_approve_checkins(bot: Bot, session_maker: async_sessionmaker[Asy
                 if version == "rest":
                     await bot.send_message(
                         chat_id=log.user_id,
-                        text="😴 Сегодня день отдыха. Позволь телу восстановиться.",
+                        text=T.scheduler.rest_day,
                         reply_markup=kb_main_menu(),
                     )
                 else:

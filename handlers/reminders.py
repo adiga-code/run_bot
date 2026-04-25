@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from handlers.utils import safe_answer
 from services.user_service import UserService
+from texts import T
 
 router = Router()
 
@@ -20,10 +21,10 @@ class ReminderStates(StatesGroup):
 
 def kb_reminders(enabled: bool, morning_hour: int, evening_hour: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    toggle_label = "🔔 Напоминания: ✅ включены" if enabled else "🔕 Напоминания: ❌ выключены"
+    toggle_label = T.btn.reminders_enabled if enabled else T.btn.reminders_disabled
     builder.button(text=toggle_label, callback_data="rem:toggle")
-    builder.button(text=f"🌅 Утро: {morning_hour:02d}:00 — изменить", callback_data="rem:set_morning")
-    builder.button(text=f"🌙 Вечер: {evening_hour:02d}:00 — изменить", callback_data="rem:set_evening")
+    builder.button(text=T.btn.btn_morning.format(hour=morning_hour), callback_data="rem:set_morning")
+    builder.button(text=T.btn.btn_evening.format(hour=evening_hour), callback_data="rem:set_evening")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -40,12 +41,11 @@ def kb_hours(prefix: str) -> InlineKeyboardMarkup:
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _reminders_text(enabled: bool, morning_hour: int, evening_hour: int) -> str:
-    status = "✅ включены" if enabled else "❌ выключены"
-    return (
-        f"🔔 <b>Напоминания</b>\n\n"
-        f"Статус: <b>{status}</b>\n"
-        f"🌅 Утреннее: <b>{morning_hour:02d}:00</b> (твоё время)\n"
-        f"🌙 Вечернее: <b>{evening_hour:02d}:00</b> (твоё время)"
+    status = T.reminders.status_enabled if enabled else T.reminders.status_disabled
+    return T.reminders.menu_text.format(
+        status=status,
+        morning_hour=morning_hour,
+        evening_hour=evening_hour,
     )
 
 
@@ -95,10 +95,7 @@ async def cb_toggle_reminders(callback: CallbackQuery, session: AsyncSession) ->
 async def cb_set_morning(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await state.set_state(ReminderStates.choosing_morning_hour)
-    await callback.message.answer(
-        "🌅 Выбери час утреннего напоминания (твоё местное время):",
-        reply_markup=kb_hours("rem:morning"),
-    )
+    await callback.message.answer(T.reminders.ask_morning_hour, reply_markup=kb_hours("rem:morning"))
 
 
 @router.callback_query(ReminderStates.choosing_morning_hour, F.data.startswith("rem:morning:"))
@@ -113,7 +110,7 @@ async def cb_morning_chosen(callback: CallbackQuery, state: FSMContext, session:
     await user_svc.update(user, morning_reminder_hour=hour)
 
     await callback.message.answer(
-        f"✅ Утреннее напоминание: <b>{hour:02d}:00</b>.\n\n"
+        T.reminders.morning_set.format(hour=hour)
         + _reminders_text(user.reminders_enabled, hour, user.evening_reminder_hour),
         parse_mode="HTML",
         reply_markup=kb_reminders(user.reminders_enabled, hour, user.evening_reminder_hour),
@@ -126,10 +123,7 @@ async def cb_morning_chosen(callback: CallbackQuery, state: FSMContext, session:
 async def cb_set_evening(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await state.set_state(ReminderStates.choosing_evening_hour)
-    await callback.message.answer(
-        "🌙 Выбери час вечернего напоминания (твоё местное время):",
-        reply_markup=kb_hours("rem:evening"),
-    )
+    await callback.message.answer(T.reminders.ask_evening_hour, reply_markup=kb_hours("rem:evening"))
 
 
 @router.callback_query(ReminderStates.choosing_evening_hour, F.data.startswith("rem:evening:"))
@@ -144,7 +138,7 @@ async def cb_evening_chosen(callback: CallbackQuery, state: FSMContext, session:
     await user_svc.update(user, evening_reminder_hour=hour)
 
     await callback.message.answer(
-        f"✅ Вечернее напоминание: <b>{hour:02d}:00</b>.\n\n"
+        T.reminders.evening_set.format(hour=hour)
         + _reminders_text(user.reminders_enabled, user.morning_reminder_hour, hour),
         parse_mode="HTML",
         reply_markup=kb_reminders(user.reminders_enabled, user.morning_reminder_hour, hour),

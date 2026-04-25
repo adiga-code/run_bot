@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 async def main() -> None:
     # 🔥 ПРОКСИ
-    proxy_url = "http://cCxo2n:8rbnxc@194.59.8.97:1733"
+    proxy_url = "http://9_Xa3l:0e1rli@140.99.236.18:3042"
 
     session = AiohttpSession(proxy=proxy_url)
 
