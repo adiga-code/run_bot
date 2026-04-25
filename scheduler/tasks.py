@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -15,21 +15,41 @@ from texts import T
 logger = logging.getLogger(__name__)
 
 
-async def _create_daily_logs(session_maker: async_sessionmaker[AsyncSession]) -> None:
+async def _create_daily_logs(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> None:
     """
     Run at 00:05 UTC every day.
     Pre-create today's SessionLog for all active users.
-    This ensures reminders can query logs by date without needing check-in first.
+    Marks users as 'completed' once the raw calendar day exceeds their program length,
+    which stops all further reminders automatically.
     """
     async with session_maker() as session:
         user_svc = UserService(session)
         log_svc = SessionLogService(session)
         users = await user_svc.all_active()
         for user in users:
-            day = await user_svc.current_program_day(user)
-            max_day = 35 if getattr(user, "extended_week5", False) else 28
-            if day is not None and day <= max_day:
-                await log_svc.get_or_create_today(user.telegram_id, day)
+            if not user.program_start_date:
+                continue
+            max_day = user_svc._max_day(user)
+            raw_day = (date.today() - user.program_start_date).days + 1
+            if raw_day > max_day:
+                await user_svc.update(user, status="completed")
+                logger.info("User %s completed the program (day %d > %d)", user.telegram_id, raw_day, max_day)
+                try:
+                    await bot.send_message(
+                        chat_id=user.telegram_id,
+                        text=(
+                            "🎉 Программа завершена!\n\n"
+                            "Ты прошёл все {} дней — это большой результат. "
+                            "Тренер свяжется с тобой по поводу дальнейших шагов 💪"
+                        ).format(max_day),
+                        reply_markup=kb_main_menu(),
+                    )
+                except Exception:
+                    pass
+            else:
+                day = await user_svc.current_program_day(user)
+                if day is not None:
+                    await log_svc.get_or_create_today(user.telegram_id, day)
 
 
 async def _send_morning_reminders(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> None:
@@ -135,7 +155,7 @@ async def _send_evening_reminders(bot: Bot, session_maker: async_sessionmaker[As
 async def _auto_approve_checkins(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> None:
     """
     Run every minute. Auto-sends the bot's recommended workout to users whose
-    check-in has been pending admin approval for more than 60 minutes.
+    check-in has been pending admin approval for more than 10 minutes.
     """
     async with session_maker() as session:
         from handlers.utils import send_workout_to_user
@@ -143,7 +163,7 @@ async def _auto_approve_checkins(bot: Bot, session_maker: async_sessionmaker[Asy
         wk_svc = WorkoutService(session)
         user_svc = UserService(session)
 
-        logs = await log_svc.pending_checkin_approvals(timeout_minutes=60)
+        logs = await log_svc.pending_checkin_approvals(timeout_minutes=10)
         for log in logs:
             try:
                 user = log.user
@@ -198,7 +218,7 @@ def setup_scheduler(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -
         replace_existing=True,
     )
 
-    # Every minute: auto-send workout if admin hasn't approved in 60 min
+    # Every minute: auto-send workout if admin hasn't approved in 10 min
     scheduler.add_job(
         _auto_approve_checkins,
         CronTrigger(minute="*"),
@@ -207,11 +227,11 @@ def setup_scheduler(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -
         replace_existing=True,
     )
 
-    # 00:05 UTC daily: pre-create logs for all active users
+    # 00:05 UTC daily: pre-create logs for all active users; complete program if finished
     scheduler.add_job(
         _create_daily_logs,
         CronTrigger(hour=0, minute=5),
-        args=[session_maker],
+        args=[bot, session_maker],
         id="daily_log_creation",
         replace_existing=True,
     )
