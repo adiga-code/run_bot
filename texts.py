@@ -610,7 +610,9 @@ class T:
         # Используй .format(name=..., level_name=..., day=..., max_day=..., week5_status=...)
         manage_header   = (
             "⚙️ <b>{name}</b>\n"
-            "Уровень: {level_name} | День: {day}/{max_day}{week5_status}"
+            "Уровень: {level_name} | День: {day}/{max_day}{week5_status}\n"
+            "Город: {city} | Район: {district}\n"
+            "Цель: {goal_line}"
         )
         choose_mode     = "Выбери режим на сегодня:"
         choose_level    = "Выбери уровень для этого пользователя:"

@@ -677,52 +677,11 @@ async def step_q_self_level(callback: CallbackQuery, state: FSMContext, session:
     # ── Уведомление тренеру ───────────────────────────────────────────────────
     tg_link = f"@{callback.from_user.username}" if callback.from_user.username else f"id:{callback.from_user.id}"
 
-<<<<<<< HEAD
     distance_block = ""
     if data.get("q_goal") == "distance":
         distance_block = T.onb.admin_distance_block.format(
             distance=T.onb.dist_labels.get(data.get("q_distance", ""), "—"),
             race_date=data.get("q_race_date") or "—",
-=======
-    goal_labels = {
-        "start_zero": "Начать с нуля",
-        "return":     "Вернуться после перерыва",
-        "distance":   "Пробежать дистанцию",
-        "improve":    "Улучшить результат",
-        "no_pain":    "Бегать без боли",
-        "health":     "Общее здоровье и форма",
-    }
-    dist_labels    = {"5k": "5 км", "10k": "10 км", "half": "Полумарафон", "full": "Марафон", "other": "Другая"}
-    runs_labels    = {"no": "Нет", "irregular": "Нерегулярно", "regular": "Регулярно"}
-    freq_labels    = {"0_1": "0–1 р/нед", "2_3": "2–3 р/нед", "4plus": "4+ р/нед"}
-    vol_labels     = {"to_10": "до 10 км", "10_25": "10–25 км", "25_50": "25–50 км", "50plus": "50+ км"}
-    longest_labels = {"to_5": "до 5 км", "5_10": "5–10 км", "10_15": "10–15 км", "15plus": "15+ км"}
-    exp_labels     = {"beginner": "Только начинаю", "to_6m": "до 6 мес", "6_12m": "6–12 мес", "1_3y": "1–3 года", "3plus": "3+ лет"}
-    break_labels   = {"no": "Нет", "to_1m": "до 1 мес", "1_3m": "1–3 мес", "3_6m": "3–6 мес", "6plus": "6+ мес"}
-    feel_labels    = {"hard": "Тяжело", "medium": "Нормально", "easy": "Комфортно"}
-    pain_labels    = {"none": "Нет", "little": "Иногда", "yes": "Регулярно"}
-    pain_inc_lbl   = {"no": "Нет", "yes": "Усиливается", "not_sure": "Не уверен(а)"}
-    str_freq_lbl   = {"no": "Не делаю", "sometimes": "Иногда", "regularly": "Регулярно"}
-    self_lbl       = {"beginner": "Новичок", "base": "Базовый", "medium": "Средний", "advanced": "Продвинутый"}
-    gender_lbl     = {"m": "Мужской", "f": "Женский"}
-
-    pain_loc = data.get("q_pain_location") or "—"
-    sports   = data.get("q_other_sports") or "—"
-
-    admin_text = (
-        f"👤 <b>Новый пользователь ждёт подтверждения!</b>\n\n"
-        f"Имя: <b>{full_name}</b>\n"
-        f"Telegram: {tg_link}\n"
-        f"ID: <code>{callback.from_user.id}</code>\n"
-        f"Пол: {gender_lbl.get(data.get('gender', ''), '—')}\n"
-        f"Город: {data.get('city') or '—'}\n"
-        f"Район: {data.get('district') or '—'}\n\n"
-        f"<b>Цель:</b> {goal_labels.get(data.get('q_goal', ''), '—')}\n"
-        + (
-            f"• Дистанция: {dist_labels.get(data.get('q_distance', ''), '—')}\n"
-            f"• Дата старта: {data.get('q_race_date') or '—'}\n"
-            if data.get("q_goal") == "distance" else ""
->>>>>>> 9d10903f55c61134f71c6a8dd1e9afb5f0cd3e89
         )
 
     strength_location = (

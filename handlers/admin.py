@@ -340,8 +340,11 @@ async def cb_admin_manage(callback: CallbackQuery, session: AsyncSession) -> Non
     current_day = await user_svc.current_calendar_day(user) or "?"
     level_name = LEVEL_NAMES.get(user.level, "?")
     max_day = 35 if getattr(user, "extended_week5", False) else 28
-<<<<<<< HEAD
     week5_status = T.admin.week5_label if getattr(user, "extended_week5", False) else ""
+    goal_line = T.onb.goal_labels.get(user.q_goal or "", "—")
+    if user.q_goal == "distance":
+        goal_line += f" | {T.onb.dist_labels.get(user.q_distance or '', '—')} | {user.q_race_date or '—'}"
+
     await callback.message.answer(
         T.admin.manage_header.format(
             name=user.full_name,
@@ -349,22 +352,10 @@ async def cb_admin_manage(callback: CallbackQuery, session: AsyncSession) -> Non
             day=current_day,
             max_day=max_day,
             week5_status=week5_status,
+            city=user.city or "—",
+            district=user.district or "—",
+            goal_line=goal_line,
         ),
-=======
-    week5_status = " | 📅 5-я неделя" if getattr(user, "extended_week5", False) else ""
-
-    _goal_lbl = {"start": "Начать с нуля", "improve": "Улучшить результат", "distance": "Подготовка к дистанции", "health": "Здоровье и тонус"}
-    _dist_lbl = {"5k": "5 км", "10k": "10 км", "hm": "Полумарафон", "fm": "Марафон", "other": "Другое"}
-    goal_line = _goal_lbl.get(user.q_goal or "", "—")
-    if user.q_goal == "distance":
-        goal_line += f" | {_dist_lbl.get(user.q_distance or '', '—')} | {user.q_race_date or '—'}"
-
-    await callback.message.answer(
-        f"⚙️ <b>{user.full_name}</b>\n"
-        f"Уровень: {level_name} | День: {current_day}/{max_day}{week5_status}\n"
-        f"Город: {user.city or '—'} | Район: {user.district or '—'}\n"
-        f"Цель: {goal_line}",
->>>>>>> 9d10903f55c61134f71c6a8dd1e9afb5f0cd3e89
         parse_mode="HTML",
         reply_markup=kb_admin_manage(user_id, extended=getattr(user, "extended_week5", False)),
     )
