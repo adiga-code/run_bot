@@ -631,6 +631,9 @@ class T:
             "✅ Чек-ин отправлен: <b>{sent}</b> пользователей\n"
             "Пропущено (заблокировали бот или нет дня): <b>{skipped}</b>"
         )
+        broadcast_skipped_header = "\n\n🚫 <b>Пропущенные пользователи:</b>\n"
+        broadcast_skipped_no_day = "нет дня"
+        broadcast_skipped_blocked = "заблокировал бот"
         approved_label  = "✅ <b>Одобрено</b>"
         rejected_label  = "❌ <b>Отклонено</b>"
         # Используй .format(level_name=..., level=..., start_label=...)

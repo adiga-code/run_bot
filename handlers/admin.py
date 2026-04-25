@@ -166,10 +166,15 @@ async def cb_broadcast_checkin(callback: CallbackQuery, session: AsyncSession) -
     users = await user_svc.all_active()
 
     sent, skipped = 0, 0
+    skipped_users: list[str] = []
+
     for user in users:
         day = await user_svc.current_program_day(user)
         if not day:
             skipped += 1
+            skipped_users.append(
+                f"• <b>{user.full_name}</b> (id: <code>{user.telegram_id}</code>) — {T.admin.broadcast_skipped_no_day}"
+            )
             continue
         await log_svc.get_or_create_today(user.telegram_id, day)
         try:
@@ -181,10 +186,18 @@ async def cb_broadcast_checkin(callback: CallbackQuery, session: AsyncSession) -
             sent += 1
         except Exception:
             skipped += 1
+            skipped_users.append(
+                f"• <b>{user.full_name}</b> (id: <code>{user.telegram_id}</code>) — {T.admin.broadcast_skipped_blocked}"
+            )
 
     logger.info("Admin %s broadcast checkin: sent=%s skipped=%s", callback.from_user.id, sent, skipped)
+
+    result_text = T.admin.broadcast_result.format(sent=sent, skipped=skipped)
+    if skipped_users:
+        result_text += T.admin.broadcast_skipped_header + "\n".join(skipped_users)
+
     await callback.message.answer(
-        T.admin.broadcast_result.format(sent=sent, skipped=skipped),
+        result_text,
         parse_mode="HTML",
         reply_markup=kb_admin_menu(),
     )
