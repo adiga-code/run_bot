@@ -3,8 +3,8 @@ from engine.red_flags import CheckinData, detect_red_flag
 
 
 def make_checkin(**overrides) -> CheckinData:
-    """Base: great state — no red flag."""
-    defaults = dict(wellbeing=3, sleep_quality=3, pain_level=1, pain_increases=None, stress_level=1)
+    """Base: отличное состояние — без красных флагов."""
+    defaults = dict(wellbeing=3, sleep_quality=3, pain_level=1, stress_level=1)
     defaults.update(overrides)
     return CheckinData(**defaults)
 
@@ -12,7 +12,7 @@ def make_checkin(**overrides) -> CheckinData:
 # ── Red flag cases ────────────────────────────────────────────────────────────
 
 def test_red_flag_pain3():
-    """Active pain (level 3) always triggers, regardless of wellbeing."""
+    """Активная боль (уровень 3, есть 6-10) → красный флаг."""
     checkin = make_checkin(pain_level=3)
     assert detect_red_flag(checkin) is True
 
@@ -22,19 +22,8 @@ def test_red_flag_pain3_with_bad_wellbeing():
     assert detect_red_flag(checkin) is True
 
 
-def test_red_flag_pain_increases():
-    checkin = make_checkin(pain_level=2, pain_increases=True)
-    assert detect_red_flag(checkin) is True
-
-
-def test_red_flag_pain_increases_regardless_of_wellbeing():
-    """Escalating pain is always a red flag, even if wellbeing is fine."""
-    checkin = make_checkin(wellbeing=3, sleep_quality=3, pain_level=2, pain_increases=True)
-    assert detect_red_flag(checkin) is True
-
-
 def test_red_flag_bad_wellbeing_and_high_stress():
-    """wellbeing==1 AND stress==3 triggers, even without pain."""
+    """wellbeing=плохо(1) И стресс=высокий(3) → красный флаг."""
     checkin = make_checkin(wellbeing=1, pain_level=1, stress_level=3)
     assert detect_red_flag(checkin) is True
 
@@ -46,24 +35,25 @@ def test_no_red_flag_great_state():
     assert detect_red_flag(checkin) is False
 
 
-def test_no_red_flag_bad_wellbeing_no_pain_no_stress():
-    """Bad wellbeing alone (without high stress) is not a red flag."""
+def test_no_red_flag_pain2_alone():
+    """Боль «немного» (уровень 2) — не красный флаг, только Light."""
+    checkin = make_checkin(pain_level=2)
+    assert detect_red_flag(checkin) is False
+
+
+def test_no_red_flag_bad_wellbeing_no_stress():
+    """Плохое самочувствие без высокого стресса — не красный флаг."""
     checkin = make_checkin(wellbeing=1, pain_level=1, stress_level=1)
     assert detect_red_flag(checkin) is False
 
 
-def test_no_red_flag_bad_wellbeing_moderate_stress():
-    """wellbeing==1 + moderate stress (not 3) is not a red flag."""
+def test_no_red_flag_bad_wellbeing_medium_stress():
+    """wellbeing=1 + стресс средний (2, не высокий 3) — не красный флаг."""
     checkin = make_checkin(wellbeing=1, pain_level=1, stress_level=2)
     assert detect_red_flag(checkin) is False
 
 
-def test_no_red_flag_pain_not_increasing():
-    checkin = make_checkin(pain_level=2, pain_increases=False)
-    assert detect_red_flag(checkin) is False
-
-
-def test_no_red_flag_pain_not_sure():
-    """not_sure about pain increases → not a red flag by itself."""
-    checkin = make_checkin(pain_level=2, pain_increases=None)
+def test_no_red_flag_bad_sleep_only():
+    """Плохой сон — не красный флаг (только Light через rule_engine)."""
+    checkin = make_checkin(wellbeing=3, sleep_quality=1, pain_level=1, stress_level=1)
     assert detect_red_flag(checkin) is False

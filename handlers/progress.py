@@ -118,7 +118,6 @@ async def cb_reset_day(callback: CallbackQuery, state: FSMContext, session: Asyn
         wellbeing=None,
         sleep_quality=None,
         pain_level=None,
-        pain_increases=None,
         stress_level=None,
         assigned_workout_id=None,
         assigned_version=None,

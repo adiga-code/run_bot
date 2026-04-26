@@ -240,8 +240,7 @@ def kb_wellbeing() -> InlineKeyboardMarkup:
     builder.button(text=T.btn.wellbeing_1, callback_data="ci:wellbeing:1")
     builder.button(text=T.btn.wellbeing_2, callback_data="ci:wellbeing:2")
     builder.button(text=T.btn.wellbeing_3, callback_data="ci:wellbeing:3")
-    builder.button(text=T.btn.wellbeing_4, callback_data="ci:wellbeing:4")
-    builder.adjust(2)
+    builder.adjust(3)
     return builder.as_markup()
 
 
@@ -268,7 +267,8 @@ def kb_pain_checkin() -> InlineKeyboardMarkup:
     builder.button(text=T.btn.pain_ci_1, callback_data="ci:pain:1")
     builder.button(text=T.btn.pain_ci_2, callback_data="ci:pain:2")
     builder.button(text=T.btn.pain_ci_3, callback_data="ci:pain:3")
-    builder.adjust(3)
+    builder.button(text=T.btn.pain_ci_info, callback_data="ci:pain_info")
+    builder.adjust(1)
     return builder.as_markup()
 
 
