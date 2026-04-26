@@ -352,7 +352,7 @@ async def cb_admin_manage(callback: CallbackQuery, session: AsyncSession) -> Non
 
     current_day = await user_svc.current_calendar_day(user) or "?"
     level_name = LEVEL_NAMES.get(user.level, "?")
-    max_day = 35 if getattr(user, "extended_week5", False) else 28
+    max_day = 42 if getattr(user, "extended_week5", False) else 28
     week5_status = T.admin.week5_label if getattr(user, "extended_week5", False) else ""
     goal_line = T.onb.goal_labels.get(user.q_goal or "", "—")
     if user.q_goal == "distance":
