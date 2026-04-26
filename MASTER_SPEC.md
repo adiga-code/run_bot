@@ -1,0 +1,1952 @@
+# МАСТЕР-СПЕЦИФИКАЦИЯ
+# Миграция логики бегового бота
+# Документ для ИИ-исполнителя — самодостаточный
+
+> Версия: 1.0
+> Дата: 2026-04-26
+> Статус: готов к реализации
+
+---
+
+# ОГЛАВЛЕНИЕ
+
+- [ЧАСТЬ I — КОНТЕКСТ ПРОЕКТА](#часть-i--контекст-проекта)
+- [ЧАСТЬ II — ТЕКУЩАЯ ЛОГИКА (КАК ЕСТЬ)](#часть-ii--текущая-логика-как-есть)
+- [ЧАСТЬ III — НОВАЯ ЛОГИКА (ПОЛНАЯ СПЕЦИФИКАЦИЯ)](#часть-iii--новая-логика-полная-спецификация)
+- [ЧАСТЬ IV — GAP-АНАЛИЗ И ПЛАН МИГРАЦИИ](#часть-iv--gap-анализ-и-план-миграции)
+- [ЧАСТЬ V — ТЕСТЫ (ОБЯЗАТЕЛЬНЫЕ)](#часть-v--тесты-обязательные)
+- [ЧАСТЬ VI — UI/ТЕКСТЫ](#часть-vi--uiтексты)
+- [ЧАСТЬ VII — КОНСТАНТЫ](#часть-vii--константы-engineconstantspy)
+- [ЧАСТЬ VIII — РЕЗЮМЕ ДЛЯ ИИ-ИСПОЛНИТЕЛЯ](#часть-viii--резюме-для-ии-исполнителя)
+
+---
+
+# ЧАСТЬ I — КОНТЕКСТ ПРОЕКТА
+
+## 1.1 Что это
+
+Telegram-бот для самостоятельных беговых тренировок. Пользователь проходит онбординг → система присваивает уровень (1–5) → ведёт по программе с ежедневными чек-инами и индивидуальными тренировками.
+
+Тренер видит чек-ины пользователей и одобряет/правит назначенные тренировки через админку. После таймаута (10 мин) бот сам отправляет рекомендованную тренировку.
+
+## 1.2 Стек
+
+- Python 3.11+
+- aiogram 3 (Telegram bot)
+- SQLAlchemy async (declarative)
+- Alembic-style миграции через `Base.metadata.create_all`
+- APScheduler (крон-джобы)
+- БД: PostgreSQL/SQLite по `DATABASE_URL`
+
+## 1.3 Структура репозитория
+
+```
+bot.py                 — точка входа
+config.py              — настройки (admin_ids, db_url)
+texts.py               — все строки UI (русский)
+import_workouts.py     — импорт workouts.json в БД
+
+database/
+  models.py            — User, Workout, SessionLog, WhitelistEntry
+  engine.py            — async engine + sessionmaker
+  middleware.py        — DI сессии в хэндлеры
+  whitelist_middleware.py
+
+engine/
+  level_assignment.py  — скоринг онбординга → level 1-4
+  rule_engine.py       — выбор версии тренировки на день
+  red_flags.py         — детектор красных флагов
+  fatigue.py           — детектор усталости (БУДЕТ УДАЛЁН)
+
+services/
+  user_service.py
+  session_log_service.py
+  workout_service.py
+  whitelist_service.py
+
+handlers/
+  onboarding.py  — анкета (~15 шагов)
+  checkin.py     — утренний чек-ин
+  workout.py     — вечерний маркинг тренировки
+  reminders.py
+  admin.py
+  start.py
+  progress.py
+  utils.py
+
+scheduler/
+  tasks.py       — крон-джобы
+
+keyboards/
+  builders.py    — фабрики inline-клавиатур
+
+data/
+  workouts.json     — 546 тренировок (4 уровня × 28 дней × 3 версии)
+  day_tips.json
+  interpretations.py
+  timezones.py
+```
+
+## 1.4 Что НЕ трогать (граница рефакторинга)
+
+- `bot.py`, `config.py` — точка входа и базовые настройки
+- async/middleware инфраструктура (`database/middleware.py`)
+- Whitelist (`whitelist_middleware.py`, `whitelist_service.py`)
+- Профильные поля User (имя, страна, часовой пояс) — структура остаётся
+- Уровень 5 (performance) — тренер ставит вручную, новая логика этот уровень не трогает
+- Шкалы чек-ина (значения 1-3 / 1-4) — маппинг под новую логику совпадает
+
+---
+
+# ЧАСТЬ II — ТЕКУЩАЯ ЛОГИКА (КАК ЕСТЬ)
+
+## 2.1 Модель данных
+
+### User
+```python
+class User:
+    telegram_id: int (PK)
+    full_name, last_name, first_name, middle_name, gender
+    birth_date, country, city, district
+    timezone_offset: int = 3                 # UTC+X
+
+    level: int | None                        # 1-5 (5 = performance, ставит тренер)
+    strength_format: str | None              # "home" / "gym"
+    program_start_date: date | None          # всегда понедельник
+    week_repeat_count: int = 0               # счётчик повторов недели
+    extended_week5: bool = False             # тренер может добавить 5-ю неделю
+
+    morning_reminder_hour: int = 8
+    evening_reminder_hour: int = 20
+    reminders_enabled: bool = True
+
+    # Onboarding raw answers
+    q_goal, q_runs, q_frequency, q_volume, q_longest_run, q_structure
+    q_experience, q_break, q_break_duration, q_run_feel
+    q_pain, q_pain_location, q_pain_increases, q_injury_history
+    q_other_sports, q_strength_frequency, q_self_level
+    q_distance, q_race_date
+
+    is_active: bool = True
+    onboarding_complete: bool = False
+    status: str = "pending"                  # pending/active/completed
+    role: str = "athlete"
+```
+
+### Workout (статический шаблон)
+```python
+class Workout:
+    id: int (PK)
+    level: int              # 1-5
+    day: int                # 1-28 (или 1-35 при extended_week5)
+    day_type: str           # "run" / "strength" / "recovery" / "rest"
+    version: str            # "base" / "light" / "recovery"
+    strength_format: str | None  # "gym" / "home" / None
+    title, short_title, text, micro_learning, video_url, media_id
+```
+
+Всего 546 строк в `data/workouts.json`. Шаблон жёстко прибит к календарным дням 1-28.
+
+**Раскладка для level 1:**
+- Силовые: дни 1, 8, 11, 15, 20, 22, 29, 34
+- Беговые: 2, 4, 6, 9, 13, 16, 18, 23, 25, 27, 30, 32
+- Recovery: 3, 7, 10, 12, 17, 21, 24, 26, 31, 35
+- Rest: 5, 14, 19, 28, 33
+
+### SessionLog
+```python
+class SessionLog:
+    id: int (PK)
+    user_id: int (FK users)
+    date: date
+    day_index: int                           # 1-28, шаблонный день для lookup
+
+    # Утренний чек-ин
+    wellbeing: int | None                    # 1=плохо, 2=тяжеловато, 3=нормально, 4=отлично
+    sleep_quality: int | None                # 1=плохо, 2=средне, 3=хорошо
+    pain_level: int | None                   # 1=нет, 2=немного, 3=есть
+    pain_increases: bool | None              # legacy
+    stress_level: int | None                 # 1=низкий, 2=средний, 3=высокий
+
+    # Назначенная тренировка
+    assigned_workout_id: int | None
+    assigned_version: str | None             # base/light/recovery/rest
+
+    # Вечерний маркинг
+    completion_status: str | None            # done/partial/skipped
+    effort_level: int | None                 # 1-5
+    completion_pain: bool | None
+
+    red_flag: bool = False
+    fatigue_reduction: bool = False
+
+    morning_sent, evening_sent, checkin_done: bool = False
+    approval_pending: bool = False
+    checkin_at: datetime | None
+```
+
+### WhitelistEntry — без изменений в новой логике.
+
+## 2.2 Жизненный цикл программы (текущий)
+
+**Старт:**
+1. Онбординг (~15 шагов) → ответы пишутся в User
+2. `engine/level_assignment.py::assign_level` → level 1-4 по скорингу
+3. Тренер подтверждает → `program_start_date = ближайший понедельник`, `status = "active"`
+
+**Каждый день (00:05 UTC, `_create_daily_logs`):**
+- Создаётся `SessionLog` для всех `status=active` пользователей
+- Если `raw_day > max_day (28 или 35)` → `status = "completed"`
+
+**Утро (`_send_morning_reminders`, ежеминутно):**
+- В час `morning_reminder_hour` (локальный) — напоминание
+- Чек-ин: 4 вопроса (самочувствие → сон → боль → стресс)
+- `engine/rule_engine.py::decide_workout_version` → base/light/recovery/rest
+- Карточка отправляется тренеру на одобрение
+- Через 10 мин — авто-отправка пользователю (`_auto_approve_checkins`)
+
+**Вечер (`_send_evening_reminders`, ежеминутно):**
+- В час `evening_reminder_hour` — напоминание отметить
+- Маркинг: done / partial / skipped → effort 1-5 → была ли боль
+
+**Конец недели (23:55 UTC, `_check_week_completion`):**
+- На 7-й и 14-й календарный день
+- Если выполнение < 75% → `week_repeat_count++`
+- Шаблонный день для следующих недель сдвигается назад на 7 (повтор)
+- Недели 3 и 4 не повторяются никогда
+
+## 2.3 Текущая логика выбора версии (`engine/rule_engine.py`)
+
+Приоритет сверху вниз:
+1. `day_type == "rest"` → rest
+2. `detect_persistent_pain` (боль ≥ 2 в 2+ из 3 последних дней) → recovery
+3. `pain_level == 3` → recovery
+4. `wellbeing == 1 AND stress_level == 3` → recovery
+5. `pain_level == 2` → light
+6. Вчера была боль → light (восстановление)
+7. `wellbeing == 1` → light
+8. `sleep_quality == 1 OR stress_level == 3` → light
+9. `detect_severe_fatigue` (3 из 3 «тяжёлых») → recovery
+10. `detect_cumulative_fatigue` (2 из 3 «тяжёлых») → light
+11. Иначе → base
+
+«Тяжёлый день» = wellbeing==1 OR stress≥2 OR sleep==1 OR effort≥4 OR completion ∈ {partial,skipped} OR pain≥2.
+
+## 2.4 Текущий онбординг и `assign_level`
+
+**Скоринг по ответам:**
+```
+runs:      yes → +1
+frequency: 0_1 → 0, 2_3 → +1, 4plus → +2
+volume:    0/to_10 → 0, 10_25 → +1, 25_50 → +2, 50plus → +3
+structure: yes → +1
+had_break: yes → -1
+pain:      little → -1
+```
+
+**Hard-стопы:**
+- `pain_increases == "yes"` → level = 1
+- `not runs` → level = 1
+- `pain == "yes"` → level ≤ 2
+- `frequency == "0_1"` → level ≤ 2
+- `not structure` → level ≤ 3
+
+**Score → level:** 0-1→1, 2-3→2, 4-5→3, 6+→4.
+
+## 2.5 Текущий чек-ин и маркинг
+
+См. `handlers/checkin.py` и `handlers/workout.py`. Чек-ин состояние машины: yesterday → wellbeing → sleep → pain → stress. Маркинг: completion → effort → had_pain.
+
+## 2.6 Текущий scheduler
+
+```
+* * * * *      _send_morning_reminders
+* * * * *      _send_evening_reminders
+* * * * *      _auto_approve_checkins
+0 5 * * *      _create_daily_logs
+55 23 * * *    _check_week_completion
+```
+
+## 2.7 Что оставляем как есть
+
+- Async + middleware DI сессии
+- Все профильные поля User
+- Whitelist
+- Шкалы чек-ина (значения 1-3, 1-4 — маппинг под новый ТЗ совпадает)
+- `import_workouts.py` (правится для библиотеки шаблонов)
+- Тексты упражнений из `workouts.json` — мигрируются в новую модель
+
+---
+
+# ЧАСТЬ III — НОВАЯ ЛОГИКА (ПОЛНАЯ СПЕЦИФИКАЦИЯ)
+
+## 3.1 Базовые принципы
+
+1. Программа — **детерминированный пайплайн** генерации недели и дня.
+2. Цикл программы **плавающий по уровню**:
+   - L1: 16–24 недели
+   - L2: 8–16 недель
+   - L3 регулярный: 12–24 недели
+   - L3 после перерыва: 8–12 недель (return-mode)
+3. Внутри уровня цикл состоит из **периодов**:
+   - L1: `base_in` → `base` → `specialized` → `recovery_period`
+   - L2: `base` → `preparatory` → разгрузочная неделя
+   - L3: `base` → `preparatory` → разгрузочная неделя
+4. Переходы между периодами — **по условиям, не по времени**.
+5. Объём измеряется **в минутах** (силовые в общий объём НЕ входят — объём это только бег).
+6. Пользователь сам выбирает **доступные дни недели** (минимум по уровню).
+7. Пользователь не выбирает тип тренировки — система раскладывает.
+8. Старт программы — **всегда понедельник**.
+9. **Стартовый объём = нижняя граница диапазона уровня**, дальше +10% по стандарту.
+10. **Единый порог 85%** во всей системе (для роста, перехода периодов, перехода уровней).
+
+## 3.2 Уровни и точки входа
+
+### Уровни в системе
+- **L1 — новичок** (полная спецификация)
+- **L2 — средний** (полная спецификация)
+- **L3 — продвинутый** (полная спецификация)
+- **L3 after break** — режим возврата продвинутого после перерыва (return-mode)
+- **L4** — НЕ реализуем сейчас, отложено
+- **L5 — performance** — ставится тренером вручную, новая логика не трогает
+
+### Точки входа для L1
+- **`base_in`** (втягивающий): не может бежать 15-20 мин, был длительный перерыв, низкая выносливость
+- **`base`** (базовый сразу): может бежать 20-30 мин, есть опыт, нет ограничений
+
+Тест на входе берётся из ответов онбординга:
+```python
+def assign_entry_point(level, answers):
+    if level >= 2:
+        return "base"
+    # level == 1
+    if not answers.runs:
+        return "base_in"
+    if answers.q_break_duration in ("3_6m", "6plus"):
+        return "base_in"
+    if answers.q_longest_run in ("0", "to_5"):  # < 5-10 мин
+        return "base_in"
+    if continuous_run_test_answer == "yes":  # 20+ мин — добавляется в онбординг
+        return "base"
+    return "base_in"
+```
+
+### Возврат после перерыва
+```
+Был L1 → стандартная программа с base_in
+Был L2 → трек "L2 после перерыва" (4-6 недель) → возврат на L2 регулярный
+Был L3 → флаг injury_return=True, level=3, target_level=3
+        → внутри крутится логика L2 (return-mode 8-12 недель)
+        → после восстановления флаг снимается, переход на L3 регулярный
+```
+
+## 3.3 Параметры уровней
+
+### 3.3.1 L1 — новичок
+
+```
+Точки входа:           base_in (60 мин/нед) или base сразу (120 мин/нед)
+Стартовый объём:       60 мин/нед (base_in) ИЛИ 120 мин/нед (base)
+Потолок:               240 мин/нед (жёсткий)
+Минимум дней:          3
+Максимум беговых:      3
+Минимум силовых:       1 (ОБЯЗАТЕЛЬНА, ключевая)
+Максимум силовых:      2
+Длина цикла:           16-24 недель плавающе
+Структура периодов:    base_in → base → specialized → recovery_period
+Зональное:             80% Z1-Z2 / 15% Z3 / 5% Z4
+Силовая фиксированно:  30 мин
+
+Минимум недель в периодах:
+  base_in:        4 недели
+  base:           6 недель
+  specialized:    4 недели (только при наличии цели)
+  recovery_period: 2 недели
+```
+
+**Раскладка по доступным дням (L1):**
+```
+3 дня:  long + 1 беговая + 1 силовая
+4 дня:  long + 2 беговых + 1 силовая
+5 дней: long + 2 беговых + 2 силовых
+```
+
+**Long для L1 — две стадии:**
+```
+Стадия 1 (зависимая):
+  long = min(средняя_беговая × 1.3, weekly_target × 0.35)
+
+Стадия 2 (независимая) — переход когда:
+  ≥ 2 недели подряд без боли
+  + easy беговая ≥ 40 мин достигнута
+  → long становится независимой тренировкой
+  → растёт по правилам L2 (≤35% недели, +10% по своей траектории)
+```
+
+### 3.3.2 L2 — средний
+
+```
+Стартовый объём:       150 мин/нед (нижняя граница 150-240)
+Потолок:               300 мин/нед (нижняя граница 300-420)
+Минимум дней:          3
+Частота:               3-5 трен/нед (3-4 беговых + 1-2 силовых + mobility)
+Длина цикла:           8-16 недель (макроцикл ≈ 8 недель, до 16 при откатах)
+Структура периодов:    base → preparatory → разгрузочная неделя
+Зональное:             75% Z1-Z2 / 20% Z3 / 5% Z4
+
+Силовая base:          30 мин
+Силовая preparatory:   40 мин
+
+Минимум недель в периодах:
+  base:           6-8 недель
+  preparatory:    6-8 недель
+  разгрузочная:   1 неделя (-40%)
+
+Формат:                ТОЛЬКО непрерывный бег (run-walk запрещён)
+                       Исключение: после травмы/перерыва — run-walk допустим
+```
+
+**Long для L2 — всегда независимая:**
+```
+long ≤ weekly_target × 0.35
+long ≤ потолок_уровня × 0.35
+long растёт постепенно (+10% от факта или удержание)
+не зависит от средней беговой
+```
+
+**Типы беговых тренировок L2:**
+- Восстановительный бег: 40 мин Z1
+- Аэробный бег: 50-70 мин Z1-Z2 (60-70% всех беговых)
+- Длительная (long): 70-100 мин Z1-Z2 (≤35% недели)
+- Темповый: 15 мин Z1 + 15-40 мин Z3 + 15 мин Z1
+- Интервальный: 15 мин Z1 + 5-7×(3-5 мин Z3-Z4 / 2-4 мин Z1) + 15 мин Z1
+- Мобильность: 20 мин (отдельный тип, не совмещён с rest)
+
+### 3.3.3 L3 — продвинутый (регулярный)
+
+```
+Стартовый объём:       180 мин/нед (нижняя граница 180-300)
+Потолок:               420 мин/нед (нижняя граница 420-600)
+Минимум дней:          4
+Частота:               4-6 трен/нед (4 беговых + 2 силовых + mobility)
+Длина цикла:           12-24 недель плавающе
+Структура периодов:    base → preparatory → разгрузочная неделя
+Зональное:             70% Z1-Z2 / 20% Z3 / 10% Z4
+
+Силовая base:          40 мин
+Силовая preparatory:   50 мин
+
+Минимум недель в периодах:
+  base:           8-10 недель
+  preparatory:    8-10 недель
+  разгрузочная:   1 неделя
+
+Формат:                непрерывный бег
+```
+
+**Long для L3:** как L2 (независимая, ≤35% недели).
+
+### 3.3.4 L3 after break (return-mode)
+
+```
+Стартовый объём:       180 мин/нед (нижняя граница 180-300)
+Потолок:               420 мин/нед
+Длина return-mode:     8-12 недель
+Логика внутри:         как L2 (формат, периоды, силовые, long)
+Поле в БД:             User.injury_return_active = True
+                       User.target_level = 3
+
+Выход из return-mode:
+  4-6 успешных недель подряд
+  + объём вышел на старт регулярного L3
+  + нет боли
+  → injury_return_active = False → переход в L3 регулярный
+
+Админ может снять флаг вручную.
+После 12 недель без выхода: остаётся в return-mode + уведомление тренеру.
+```
+
+### 3.3.5 Стартовые объёмы — единое правило
+
+**Все уровни стартуют с нижней границы своего диапазона:**
+
+| Уровень | Точка входа | Старт | Потолок |
+|---------|-------------|-------|---------|
+| L1 | base_in | 60 мин/нед | 240 |
+| L1 | base сразу | 120 мин/нед | 240 |
+| L2 | base | 150 мин/нед | 300 |
+| L3 | base | 180 мин/нед | 420 |
+| L3 after break | base | 180 мин/нед | 420 |
+
+`q_volume` из онбординга для тонкой настройки старта НЕ используется. Прогрессия за 2-4 недели сама поднимет объём до рабочего.
+
+## 3.4 Периоды и переходы
+
+### 3.4.1 Структура периодов по уровням
+
+```
+L1: base_in → base → specialized → recovery_period
+L2: base → preparatory → разгрузочная неделя (внутри цикла)
+L3: base → preparatory → разгрузочная неделя
+L3 after break: те же что L2, флагом injury_return
+```
+
+**Замечание:** для L2 и L3 `recovery_period` = просто 1 разгрузочная неделя в конце цикла, НЕ отдельный длинный период.
+
+### 3.4.2 Условия перехода период → период
+
+**L1 base_in → base:**
+- Может бежать непрерывно 20-30 мин
+- ≥85% выполнения за весь base_in
+- Нет боли «есть»
+- Минимум 4 недели в base_in
+
+**L1 base → specialized:**
+- Есть цель забега (`q_goal == "race" / "distance"`)
+- ≥85% выполнения
+- Стабильная нагрузка
+- Long выполняется регулярно
+- Нет боли
+- Минимум 6 недель в base
+- Если цели нет → остаётся в base, продолжает расти
+
+**L1 specialized → recovery_period:**
+- Автоматически после пика объёма
+
+**L1 recovery_period → конец цикла:**
+- Автоматически после 2-4 недель
+
+**L2 base → preparatory:**
+- ≥85% выполнения за base
+- Нет боли
+- Стабильная нагрузка
+- Long регулярный
+- Минимум 6 недель в base
+
+**L2/L3 preparatory → разгрузочная неделя → новый цикл:**
+- Автоматически после пика объёма
+
+### 3.4.3 Условия перехода уровень → уровень
+
+**L1 → L2:**
+- Цикл завершён (≥16 недель)
+- ≥85% выполнения за весь цикл
+- Все ключевые тренировки выполнены большинство недель
+- Нет хронических проблем
+- Объём вышел за рамки L1 (стабильно держал 200+ мин/нед)
+- Пользователь подтверждает в боте
+
+**L2 → L3:**
+- Те же критерии + способность выполнять длительные тренировки
+- (Метрика «снижение пульса на 5%» — ИГНОРИРУЕМ, тренер смотрит вручную)
+
+### 3.4.4 Конец цикла
+
+**Длина цикла по уровням:**
+- L1: 16-24 недели (минимум 16, максимум 24)
+- L2: 8-16 недель
+- L3: 12-24 недели
+- L3 after break: 8-12 недель
+
+После пиковой preparatory недели + разгрузочной недели → конец цикла.
+
+**Что предлагается пользователю:**
+```
+Если цикл пройден успешно (≥85% общая, нет проблем):
+  Спросить: «Перейти на следующий уровень или остаться?»
+
+  Перейти:
+    level += 1
+    новый цикл с base/base_in
+    стартовый объём = нижняя граница нового уровня
+
+  Остаться:
+    тот же level
+    новый цикл с base/base_in
+    стартовый объём = peak_of_last_cycle × 1.4
+    (но не выше потолка уровня)
+
+Если цикл провален (не достиг условий):
+  тот же level
+  новый цикл с base/base_in
+  стартовый объём = объём последней разгрузочной × 1.10
+```
+
+После максимальной длины цикла без выхода:
+- L1 (24 нед), L2 (16 нед), L3 (24 нед), L3 after break (12 нед)
+- → требуется решение тренера (уведомление в админку)
+
+## 3.5 Доступные дни и раскладка тренировок
+
+### 3.5.1 Минимум дней по уровню
+
+| Уровень | Минимум дней |
+|---------|--------------|
+| L1 | 3 |
+| L2 | 3 |
+| L3 | 4 |
+| L3 after break | 3 (как L2) |
+
+Если в онбординге пользователь выбрал меньше минимума — **онбординг не пускает дальше**, требуется выбрать ещё дней.
+
+### 3.5.2 Раскладка по количеству выбранных дней
+
+```
+3 дня (L1, L2, L3-return):
+  long + 1 беговая + 1 силовая
+
+4 дня (L1, L2, L3, L3-return):
+  long + 2 беговых + 1 силовая
+
+5 дней (L1, L2, L3, L3-return):
+  long + 2 беговых + 2 силовых
+  (+1 mobility опционально вписать в существующий день)
+
+6 дней (L3, L3-return):
+  long + 3 беговых + 2 силовых
+  (либо long + 2 беговых + 2 силовых + 1 mobility)
+```
+
+### 3.5.3 Правила позиционирования
+
+- **Long** — последний доступный день недели (предпочтительно Сб или Вс)
+- **Между беговыми** — минимум 1 день без бега, если возможно
+- **Силовая запрещена** за день до long и перед интенсивной беговой
+- **Силовую** разрешено совмещать с лёгким бегом в один день
+- **Mobility** — после силовой / после бега / в день отдыха
+
+## 3.6 Расчёт минут на тренировку
+
+`weekly_target_minutes` — целевой ОБЪЁМ БЕГА на неделю (силовые в это число не входят).
+
+### 3.6.1 Long для L1
+
+**Стадия 1 (на старте):**
+```
+N = количество беговых дней в неделе
+avg_run = weekly_target_minutes / N
+long = min(avg_run × 1.3, weekly_target × 0.35)
+
+Остальные беговые:
+  remaining_running = weekly_target - long
+  per_easy = remaining_running / (N - 1)
+```
+
+**Стадия 2 (после стабилизации):**
+
+Условия перехода в стадию 2:
+- ≥ 2 недели подряд без боли (никакой — pain=1 во все дни)
+- Easy-тренировка достигла 40 мин
+
+После перехода:
+```
+long = ≤ weekly_target × 0.35
+long растёт самостоятельно по +10% от факта
+не привязан к средней беговой
+
+Остальные беговые:
+  per_easy = (weekly_target - long) / (N - 1)
+```
+
+### 3.6.2 Long для L2
+
+```
+long = ≤ weekly_target × 0.35
+     = ≤ потолок_уровня × 0.35  (т.е. ≤ 105 мин для L2)
+long растёт +10% от факта или удерживается
+независимая тренировка с самого начала L2
+```
+
+### 3.6.3 Long для L3
+
+```
+long = ≤ weekly_target × 0.35
+     = ≤ потолок_уровня × 0.35  (т.е. ≤ 147 мин для L3)
+тот же принцип что L2
+```
+
+### 3.6.4 Аэробный / Восстановительный / Easy беги
+
+**L1 easy / run-walk:**
+```
+формат: разминка 5 мин шаг + чередование (бег/шаг) + заминка 5 мин шаг
+длительность: per_easy (см. выше)
+zona: Z1-Z2
+```
+
+**L2 типы:**
+- Восстановительный бег: 40 мин Z1 (используется в восстановительные дни / после интенсивных)
+- Аэробный бег: 50-70 мин Z1-Z2 (основной)
+- Если в неделе есть и Recovery и Aerobic, Recovery идёт первым
+
+**L3 типы:**
+- Восстановительный бег: 50 мин Z1
+- Аэробный бег: 60-80 мин Z1-Z2
+
+### 3.6.5 Силовая (минуты по уровню × периоду)
+
+| Уровень | base_in | base | preparatory/specialized |
+|---------|---------|------|-------------------------|
+| L1 | 30 | 30 | 30 |
+| L2 | — | 30 | 40 |
+| L3 | — | 40 | 50 |
+
+Силовые не входят в `weekly_target_minutes`.
+
+### 3.6.6 Mobility
+
+20 мин фиксированно для всех уровней. Не считается в объём бега.
+
+## 3.7 Версии тренировки (Base/Light/Recovery/Rest)
+
+### 3.7.1 Приоритет принятия решения по чек-ину
+
+```
+ШКАЛЫ:
+  wellbeing:    1=плохо, 2=тяжеловато, 3=нормально, 4=отлично
+  sleep:        1=плохо, 2=средне, 3=хорошо
+  stress:       1=низкий, 2=средний, 3=высокий
+  pain:         1=нет (0-2/10), 2=немного (3-5/10), 3=есть (6-10/10)
+
+ПРИОРИТЕТ (сверху вниз):
+  1. day_type == "rest"                       → Rest
+  2. pain == 3 (есть)                         → Recovery
+  3. pain == 2 (немного)                      → Light
+  4. wellbeing == 1 (плохо)                   → Light
+  5. sleep == 1 ИЛИ stress == 3               → Light
+  6. Возврат после боли:
+     вчера было pain ≥ 2, сегодня pain == 1   → Light (1 день)
+  7. Иначе                                    → Base
+```
+
+### 3.7.2 Что делает каждая версия
+
+**Base:**
+- Выполнение по плану дня без изменений
+- Полный объём, полная структура
+
+**Light:**
+- Объём -20% от планового
+- БЕЗ интервалов и темпа (если день был tempo/intervals — заменяется на easy)
+- Формат: easy / run-walk
+- Если день long → long тоже -20%, НЕ заменяется на easy
+
+**Recovery:**
+- Тип дня игнорируется
+- Всегда: ходьба 20-30 мин в Z1 + опционально мобильность
+- БЕЗ бега и БЕЗ силовой
+
+**Rest:**
+- День отдыха по плану
+- Можно мобилити по желанию
+
+### 3.7.3 Шкалы чек-ина и маппинг
+
+Шкалы остаются как сейчас (1-3 / 1-4). Маппинг боли с шкалой 0-10 (для отображения пользователю):
+```
+1 = нет     — 0-2/10
+2 = немного — 3-5/10
+3 = есть    — 6-10/10
+```
+
+### 3.7.4 Возврат после боли
+
+Если вчера `pain ≥ 2`, сегодня `pain == 1`:
+- Сегодня **Light** (1 день)
+- Дальше по чек-ину
+- Это правило отдельное в приоритете (пункт 6)
+
+## 3.8 Учёт выполнения
+
+### 3.8.1 Done / Skipped (Partial удалён)
+
+Вечерний маркинг: только 2 кнопки.
+- ✅ Выполнено → `completion_status = "done"`, засчитывается 100%
+- ❌ Не выполнено → `completion_status = "skipped"`, 0%
+
+**Partial удаляется полностью** (из БД допустимых значений, из UI, из логики прогрессии).
+
+### 3.8.2 Light = выполнено, Recovery на ключевом = не выполнено
+
+```
+Light выполнен  → ключевая тренировка засчитывается как выполненная
+Recovery на ключевом дне → ключевая НЕ выполнена
+                        (даже если пользователь сделал ходьбу)
+```
+
+### 3.8.3 Ключевые тренировки
+
+В каждой неделе обязательно 3 ключевые:
+- **long**
+- **1 основная беговая** (run-walk / easy / aerobic — любая из обычных)
+- **1 силовая**
+
+Если хотя бы одна ключевая не выполнена → недельный рост заблокирован.
+
+## 3.9 Условие успешной недели и рост
+
+### 3.9.1 Критерии успешной недели
+
+Все 4 условия одновременно:
+```
+1. ≥85% всех запланированных тренировок выполнено (по головам, не минутам)
+2. Все 3 ключевые тренировки выполнены
+3. Не было ни одного дня с pain == 3 (боль «есть»)
+4. Не было ≥3 дней с Light (за неделю)
+5. Не было ≥2 дней с Recovery (за неделю)
+   (примечание: pain == 2 ≤ 2 дней — норма; 3+ дней подряд → отдельный триггер для отката)
+```
+
+### 3.9.2 Light/Recovery как блокер
+
+```
+Light ≥ 3 дней в неделю    → неделя неуспешная
+Recovery ≥ 2 дней в неделю → неделя неуспешная
+
+Применяется для:
+- блокировки роста объёма
+- блокировки добавления tempo/intervals
+- блокировки перехода периода/уровня
+```
+
+### 3.9.3 Прогрессия объёма
+
+```
+Если неделя успешная (все условия выше):
+  next_week_target = current_week_actual × 1.10
+
+Если неделя неуспешная:
+  next_week_target = current_week_target  (удержание)
+
+Разгрузочная неделя:
+  next_week_target = peak_volume × 0.6
+  (peak_volume = объём пиковой недели текущего блока 3-х успешных)
+
+После разгрузочной (следующая неделя):
+  next_week_target = peak_volume × 1.10
+  (рост от пика, разгрузочная не учитывается в траектории)
+
+Жёсткий потолок:
+  next_week_target = min(calculated, ceiling_for_level)
+```
+
+### 3.9.4 Счётчики
+
+```
+growth_streak: int        — подряд недель с ростом
+                            ++ при каждой успешной неделе с ростом
+                            сброс при неуспешной/повторе/разгрузке
+
+weeks_since_recovery: int — недель с последней разгрузки
+                            ++ каждую неделю
+                            сброс при разгрузочной неделе
+```
+
+### 3.9.5 Триггеры разгрузки
+
+```
+Стандарт: growth_streak == 3 → следующая неделя разгрузочная
+Fail-safe: weeks_since_recovery == 6 → принудительная разгрузка
+```
+
+После разгрузки оба счётчика сбрасываются в 0.
+
+### 3.9.6 Возврат к пику после разгрузки
+
+```
+Перед разгрузкой:
+  peak_before_recovery = current_week_actual
+
+В разгрузочную:
+  weekly_target = peak_before_recovery × 0.6
+
+После разгрузочной:
+  weekly_target = peak_before_recovery × 1.10
+  (не от разгрузочной, а от ПРЕДРАЗГРУЗОЧНОЙ недели)
+```
+
+## 3.10 Tempo и интервалы — единое правило
+
+### 3.10.1 Общие условия добавления
+
+Tempo и интервалы можно добавлять только если **одновременно**:
+```
+1. ≥85% выполнения за последний блок
+2. Завершён блок «3 успешные недели роста + разгрузочная»
+3. Нет боли (pain ≥ 2 за последние 2 недели)
+4. Light ≤ 2 / нед, Recovery ≤ 1 / нед в последних 4 неделях
+5. Прошёл минимум по уровню/периоду (см. ниже)
+```
+
+### 3.10.2 По периодам и уровням
+
+**L1 base_in:**
+- Tempo: запрещено
+- Intervals: запрещено
+- Только Z1-Z2
+
+**L1 base:**
+- Не ранее 8 недель от старта программы пользователя
+- Tempo: 1 раз/нед максимум, короткая сессия (15-20 мин Z3)
+- Intervals: 1 раз/нед максимум, короткие интервалы (30-120 сек)
+- В одну неделю — НЕ БОЛЕЕ 1 интенсивной (tempo ИЛИ intervals)
+
+**L1 specialized:**
+- Tempo: разрешено
+- Intervals: разрешено
+- 1-2 интенсивные/нед
+- Заменяет часть беговой, не добавляется
+
+**L1 recovery_period / разгрузочная:**
+- Tempo: запрещено
+- Intervals: запрещено
+
+**L2 base:**
+- Intervals: с 3-й успешной недели подряд (не календарной), не чаще 1/нед
+- Tempo: 1/нед максимум, редко
+- НЕ БОЛЕЕ 1 интенсивной/нед
+
+**L2 preparatory:**
+- Tempo: регулярно
+- Intervals: регулярно
+- 1-2 интенсивные/нед
+- Строго не более 1 интервальной/нед
+
+**L2/L3 разгрузочная:**
+- Tempo: запрещено
+- Intervals: запрещено
+
+**L3 — те же правила что L2** + большая длительность работы (см. параметры тренировок).
+
+### 3.10.3 Правило замены
+
+```
+Интенсивность НИКОГДА не добавляется поверх объёма.
+Она ЗАМЕНЯЕТ одну из обычных беговых тренировок недели.
+
+Пример L2 base:
+  План недели: long + аэробный + аэробный + силовая
+  Добавляем интервалы → один из аэробных становится интервальным:
+  long + интервальный + аэробный + силовая
+```
+
+## 3.11 Откат и Red Flag
+
+### 3.11.1 Триггер
+
+```
+3 дня боли «есть» (pain == 3) подряд
+→ red_flag_active = True
+→ red_flag_reason = "3 days pain == 3"
+→ red_flag_at = today
+```
+
+### 3.11.2 Что делает откат
+
+```
+Со следующей недели:
+  weekly_target_minutes = last_successful_week.weekly_target_minutes
+  growth_streak = 0
+  weeks_since_recovery = (сохраняется или сбрасывается? — сбрасывается в 0)
+  раскладка дней пересчитывается заново
+  (это НЕ копия плана прошлой недели, только цифра объёма)
+
+Рост заблокирован, пока не повторят успешно эту неделю.
+```
+
+### 3.11.3 Recovery в дни боли
+
+После активации red_flag:
+- Пользователь НЕ сидит в Recovery постоянно
+- В день, когда `pain == 3` по чек-ину → автоматически Recovery (как обычно)
+- В остальные дни — тренируется по плану отката
+
+### 3.11.4 Снятие флага
+
+```
+Автоматически:
+  1 успешная неделя при активном red_flag
+  (≥85% + все ключевые + нет боли «есть»)
+  → red_flag_active = False
+  → разрешается рост со следующей недели
+
+Вручную админом:
+  Кнопка в админке «Снять red flag»
+  → red_flag_active = False
+  → откат не применяется
+  → пользователь продолжает по текущему плану БЕЗ пересчёта
+```
+
+## 3.12 Зональное распределение (информационное)
+
+```
+L1: 80% Z1-Z2 / 15% Z3 / 5% Z4 / 0% Z5
+L2: 75% Z1-Z2 / 20% Z3 / 5% Z4
+L3: 70% Z1-Z2 / 20% Z3 / 10% Z4
+```
+
+**Используется только при сборке плана** (как guidance для пропорций tempo/intervals в неделе). НЕ используется как метрика контроля — пользователь не вводит, в каких зонах реально бежал.
+
+## 3.13 Чек-ин — UI
+
+### 3.13.1 Утренний чек-ин (4 вопроса)
+
+Без изменений по структуре, корректировки текстов:
+1. Самочувствие (4 кнопки)
+2. Сон (3 кнопки)
+3. Боль (3 кнопки + кнопка «подробнее» с расшифровкой 0-10)
+4. Стресс (3 кнопки)
+
+### 3.13.2 Вечерний маркинг (2 кнопки)
+
+```
+✅ Выполнено  → done
+❌ Не выполнено → skipped
+```
+
+После «выполнено»: спросить effort 1-5 + была ли боль (как сейчас).
+Кнопку «частично» **удалить полностью**.
+
+---
+
+# ЧАСТЬ IV — GAP-АНАЛИЗ И ПЛАН МИГРАЦИИ
+
+## 4.1 Изменения в моделях БД
+
+### 4.1.1 User — новые поля
+
+```python
+# ДОБАВИТЬ:
+available_weekdays: str | None = None          # "1,3,5" (1=Пн..7=Вс)
+weekly_target_minutes: int | None = None       # текущая цель недели в минутах
+peak_volume_minutes: int | None = None         # пик в текущем блоке 3-х недель
+last_successful_volume: int | None = None      # объём последней успешной недели (для отката)
+
+current_period: str | None = None              # base_in/base/preparatory/specialized/recovery_period
+period_start_date: date | None = None
+period_week_number: int = 1                    # неделя внутри текущего периода
+
+cycle_number: int = 1                          # номер цикла (1, 2, 3...)
+cycle_start_date: date | None = None
+program_week_number: int = 1                   # сквозная неделя пользователя
+
+growth_streak: int = 0                         # счётчик подряд недель с ростом
+weeks_since_recovery: int = 0                  # для fail-safe разгрузки
+
+red_flag_active: bool = False
+red_flag_reason: str | None = None
+red_flag_at: date | None = None
+
+has_goal_race: bool = False                    # из q_goal — для перехода в specialized
+entry_point: str | None = None                 # base_in / base — точка входа на старте
+
+injury_return_active: bool = False             # для L3 after break
+target_level: int | None = None                # для return-mode
+
+# Стадия long для L1
+l1_long_independent: bool = False              # переход в стадию 2 (независимый long)
+l1_no_pain_streak_weeks: int = 0               # счётчик недель без боли (для перехода стадии)
+l1_easy_reached_40min: bool = False            # easy достигла 40 мин
+
+# УДАЛИТЬ (оставить как deprecated, потом снести):
+week_repeat_count
+extended_week5
+```
+
+### 4.1.2 Новая таблица WeekPlan
+
+```python
+class WeekPlan:
+    id: int (PK)
+    user_id: int (FK users)
+    week_number: int                           # сквозная нумерация
+    cycle_number: int
+    period: str                                # base_in/base/preparatory/specialized/recovery_period
+    period_week_number: int                    # неделя внутри периода
+
+    start_date: date                           # понедельник недели
+    end_date: date                             # воскресенье
+
+    weekly_target_minutes: int                 # цель по бегу
+    is_recovery_week: bool = False
+    is_rollback_week: bool = False
+
+    # Раскладка по дням (7 nullable полей)
+    monday_type: str | None
+    monday_minutes: int | None
+    monday_intensity: str | None               # null / "z3_inclusions" / "tempo" / "intervals"
+    monday_is_key: bool = False
+    # ... аналогично tuesday-sunday
+
+    # Итоги (заполняется в конце недели)
+    actual_minutes: int | None = None
+    completion_rate: float | None = None       # 0.0-1.0
+    keys_completed: bool | None = None         # все ли 3 ключевые
+    growth_eligible: bool | None = None
+    no_growth_reason: str | None = None
+    closed_at: datetime | None = None
+```
+
+### 4.1.3 Workout → WorkoutTemplate (библиотека)
+
+**Старая таблица `Workout`** остаётся для пользователей на старой 28-дневной программе.
+
+**Новая таблица `WorkoutTemplate`:**
+```python
+class WorkoutTemplate:
+    id: int (PK)
+    level: int
+    day_type: str                              # run / strength / recovery / rest / mobility
+    run_subtype: str | None                    # easy / aerobic / recovery_run / long / tempo / intervals / run_walk
+    version: str                               # base / light / recovery
+    intensity_kind: str | None                 # null / z3_inclusions / tempo / intervals
+    period: str | None                         # base_in / base / preparatory / null (универсал)
+    strength_format: str | None                # gym / home / null
+
+    title: str
+    text: str                                  # текст с placeholder'ами для минут
+    short_title: str | None
+    micro_learning: str | None
+    video_url: str | None
+    media_id: str | None
+```
+
+Без жёсткой привязки к конкретному `day` 1-28.
+
+### 4.1.4 SessionLog — мелкие правки
+
+```python
+# ДОБАВИТЬ:
+week_plan_id: int | None (FK week_plans)       # связь с недельным планом
+day_of_week: int | None                        # 1-7 (Пн-Вс)
+planned_minutes: int | None                    # что было запланировано
+is_key_workout: bool = False                   # ключевая ли
+
+# УДАЛИТЬ (или сделать deprecated):
+day_index                                       # больше не нужен
+fatigue_reduction                               # логика fatigue убрана
+
+# Уточнить:
+completion_status: убрать значение "partial" из enum
+```
+
+## 4.2 Изменения в файлах кода
+
+### 4.2.1 `engine/level_assignment.py` — расширить
+
+**Сохранить:** `assign_level(answers) -> int` (1-4 по скорингу).
+
+**Добавить:**
+```python
+def assign_entry_point(level: int, answers: OnboardingAnswers) -> str:
+    """Возвращает 'base_in' или 'base'."""
+
+def assign_starting_volume(level: int, entry_point: str) -> int:
+    """Минут/нед — нижняя граница уровня."""
+
+def detect_level3_after_break(level: int, answers: OnboardingAnswers) -> bool:
+    """level == 3 + был длительный перерыв → return-mode."""
+
+def assign_initial_period(level: int, entry_point: str) -> str:
+    """Первый период программы."""
+```
+
+### 4.2.2 `engine/rule_engine.py` — переписать
+
+**Удалить:**
+- Вызовы `detect_cumulative_fatigue`, `detect_severe_fatigue`, `detect_persistent_pain`
+- Ветку «плохо + стресс высокий → recovery»
+
+**Оставить только новый приоритет (см. 3.7.1):**
+```python
+def decide_workout_version(checkin, recent_logs, day_type, prev_day_type) -> WorkoutDecision:
+    if day_type == "rest": return rest
+    if checkin.pain == 3: return recovery
+    if checkin.pain == 2: return light
+    if checkin.wellbeing == 1: return light
+    if checkin.sleep == 1 or checkin.stress == 3: return light
+    # Возврат после боли
+    if recent_logs and recent_logs[-1].pain >= 2 and checkin.pain == 1:
+        return light  # 1 день
+    return base
+```
+
+`WorkoutDecision` упростить: `version`, `reason` (red_flag и fatigue_reduction убрать — это уровень недели/состояния пользователя).
+
+### 4.2.3 `engine/fatigue.py` — УДАЛИТЬ
+
+Файл и его использования полностью удаляются.
+
+### 4.2.4 `engine/red_flags.py` — переписать
+
+```python
+def detect_high_pain_streak(recent_logs, days=3) -> bool:
+    """3 дня подряд pain == 3 → red flag."""
+
+def detect_mild_pain_streak(recent_logs, days=3) -> bool:
+    """3 дня подряд pain == 2 → блокировка роста (но не red flag)."""
+```
+
+Функция `detect_red_flag(checkin)` — удалить (больше не используется в day-level decision).
+
+### 4.2.5 `engine/week_planner.py` — НОВЫЙ
+
+```python
+def build_week_plan(
+    user: User,
+    week_number: int,
+    period: str,
+    target_minutes: int,
+    is_recovery: bool,
+    available_weekdays: list[int],
+) -> WeekPlan:
+    """
+    Сборка недели:
+    1. Определить количество тренировок по уровню + дням
+    2. Распределить типы по дням (long, easy/aerobic/recovery, силовые)
+    3. Рассчитать минуты на каждую беговую (с учётом стадии long для L1)
+    4. Решить, есть ли интенсивность (по периоду, недельным условиям)
+    5. Пометить ключевые
+    6. Вернуть готовый WeekPlan
+    """
+
+def split_running_minutes(weekly_target, period, level, is_long_independent) -> dict:
+    """Возвращает: {long_min, easy_min, recovery_run_min, ...}"""
+
+def can_add_intensity(user, period, recent_weeks) -> bool:
+    """Проверка по разделу 3.10.1"""
+```
+
+### 4.2.6 `engine/week_evaluator.py` — НОВЫЙ
+
+```python
+@dataclass
+class WeekEvaluation:
+    completion_rate: float
+    keys_completed: bool
+    had_high_pain: bool                        # хоть один день pain==3
+    high_pain_streak: int                      # макс серия pain==3
+    mild_pain_streak: int                      # макс серия pain==2
+    light_days: int
+    recovery_days: int
+    actual_minutes: int
+    growth_eligible: bool
+    no_growth_reason: str | None
+    triggers_rollback: bool                    # 3 дня pain==3 подряд
+
+def evaluate_week(week_plan, logs) -> WeekEvaluation:
+    ...
+
+@dataclass
+class NextWeekDecision:
+    next_target_minutes: int
+    is_recovery_week: bool
+    is_rollback: bool
+    new_period: str | None
+    cycle_ended: bool
+
+def decide_next_week(user, current_week, evaluation) -> NextWeekDecision:
+    ...
+```
+
+### 4.2.7 `engine/period_transitions.py` — НОВЫЙ
+
+```python
+def check_period_transition(user, recent_weeks) -> str | None:
+    """Возвращает имя нового периода или None."""
+
+def check_cycle_end(user, current_week_evaluation) -> bool:
+    """Цикл завершён? (после preparatory + разгрузка)"""
+
+def start_new_cycle(user, mode: Literal["advance", "stay", "redo"]) -> None:
+    """
+    advance: level += 1, новый цикл
+    stay: тот же level, peak_of_last × 1.4
+    redo: тот же level, recovery_volume × 1.10
+    """
+
+def check_l1_long_stage_transition(user, recent_weeks) -> bool:
+    """L1: переход long из стадии 1 в стадию 2."""
+
+def check_injury_return_exit(user, recent_weeks) -> bool:
+    """L3 after break: 4-6 успешных недель + объём → выход в L3 регулярный."""
+```
+
+### 4.2.8 `engine/workout_renderer.py` — НОВЫЙ
+
+```python
+def render_workout(
+    template: WorkoutTemplate,
+    target_minutes: int,
+    version: str,                              # base / light / recovery
+    intensity_kind: str | None,
+    long_stage: int | None = None,             # для L1
+) -> str:
+    """
+    Берёт шаблон + параметры → финальный текст тренировки.
+    Light: -20% к минутам, исключение интервалов/темпа.
+    Recovery: всегда «прогулка 20-30 мин Z1».
+    """
+```
+
+### 4.2.9 `engine/constants.py` — НОВЫЙ
+
+См. ЧАСТЬ VII полностью.
+
+### 4.2.10 services — правки
+
+**`services/user_service.py`:**
+
+Удалить:
+- `current_calendar_day`, `current_template_day`, `current_program_day`
+- `_max_day`, `current_week_range`, `log_calendar_day`
+
+Добавить:
+- `current_week_plan(user) -> WeekPlan | None`
+- `current_day_in_week(user) -> int` (1-7)
+- `weeks_remaining_in_cycle(user) -> int`
+
+`reset_progress` обновить: чистить новые поля + WeekPlan'ы.
+
+**`services/session_log_service.py`:**
+
+Удалить:
+- `week_completion_rate`, `week_completion_rate_by_dates`
+
+Добавить:
+- `completion_rate_for_week_plan(week_plan_id)` — счёт по головам, done=1, skipped=0
+- Удалить ссылки на "partial"
+
+**`services/week_plan_service.py` — НОВЫЙ:**
+
+```python
+class WeekPlanService:
+    async def get_current(user_id) -> WeekPlan | None
+    async def get_last(user_id) -> WeekPlan | None
+    async def get_last_successful(user_id) -> WeekPlan | None
+    async def create_for_next_week(user, decision: NextWeekDecision) -> WeekPlan
+    async def close_week(week_plan, evaluation) -> None
+```
+
+### 4.2.11 `handlers/onboarding.py` — новые шаги
+
+Добавить состояния в `OnboardingStates`:
+```python
+q_continuous_run_test = State()    # Можешь ли пробежать 20+ мин без остановки?
+q_available_days = State()         # Мультивыбор Пн-Вс, минимум по уровню
+```
+
+Куда вставить:
+- `q_continuous_run_test` после `q_longest_run` (Блок 3)
+- `q_available_days` в Блок 7 после `q_strength_frequency`
+
+После всех вопросов перед сохранением — валидация:
+```python
+if level == 3 and len(available_weekdays) < 4:
+    return "выбери минимум 4 дня"
+```
+
+### 4.2.12 `handlers/checkin.py` + `handlers/workout.py` — упростить
+
+**checkin.py:**
+- В `_finish_checkin` вместо `current_template_day` → читать текущий день из `WeekPlan`
+- Использовать новый `engine/rule_engine.py`
+- Применять `engine/workout_renderer.py` для финального текста
+- Использовать `WorkoutTemplate` вместо старого `Workout`
+
+**workout.py:**
+- 2 кнопки в `cb_completion_status` (убрать partial)
+- Удалить `BASIC_WORKOUT_TEXT` использования partial
+
+### 4.2.13 `handlers/admin.py` — кнопка снятия red flag
+
+Добавить в карточку пользователя:
+- «Снять red flag» — обнуляет `red_flag_active`
+- «Принудительная разгрузка» (опционально) — устанавливает следующую неделю как разгрузочную
+- Просмотр текущего `WeekPlan` пользователя
+
+### 4.2.14 `scheduler/tasks.py` — переписать
+
+**`_create_daily_logs` — переделать:**
+- Брать день из текущего `WeekPlan` пользователя (через `current_day_in_week`)
+- Если у юзера нет `WeekPlan` на эту неделю — создать (это будет первая неделя или после ошибки)
+- Закрытие программы (status=completed) убрать — программа теперь циклическая
+
+**`_check_week_completion` — переписать полностью:**
+```python
+# Воскресенье 23:55 UTC
+for user in active_users:
+    current_week_plan = await week_plan_svc.get_current(user.telegram_id)
+    if not is_week_ending_today(current_week_plan): continue
+
+    logs = await log_svc.get_logs_for_week_plan(current_week_plan.id)
+    evaluation = evaluate_week(current_week_plan, logs)
+    await week_plan_svc.close_week(current_week_plan, evaluation)
+
+    # Проверка отката
+    if evaluation.triggers_rollback:
+        await activate_red_flag(user, evaluation)
+
+    # Решение по следующей неделе
+    decision = decide_next_week(user, current_week_plan, evaluation)
+
+    # Проверка перехода периода
+    new_period = check_period_transition(user, recent_weeks=...)
+    if new_period:
+        await transition_period(user, new_period)
+
+    # Проверка конца цикла
+    if check_cycle_end(user, evaluation):
+        await prompt_user_for_next_cycle_choice(user)
+        continue
+
+    # Проверка стадии long для L1
+    if user.level == 1 and not user.l1_long_independent:
+        if check_l1_long_stage_transition(user, recent_weeks=...):
+            await user_svc.update(user, l1_long_independent=True)
+
+    # Проверка выхода из injury_return
+    if user.injury_return_active:
+        if check_injury_return_exit(user, recent_weeks=...):
+            await exit_injury_return(user)
+
+    # Создать WeekPlan для следующей недели
+    await week_plan_svc.create_for_next_week(user, decision)
+```
+
+Убрать `extended_week5` ссылки.
+
+### 4.2.15 `keyboards/builders.py` — правки
+
+**Убрать:**
+- Кнопку partial в `kb_completion()`
+- `kb_completion_strength` (если отдельный) — переделать
+
+**Добавить:**
+- `kb_continuous_run_test()` — Да/Нет/Не уверен
+- `kb_available_days()` — мультивыбор Пн-Вс с галочками
+
+### 4.2.16 `texts.py` — правки
+
+См. ЧАСТЬ VI.
+
+## 4.3 Миграция данных
+
+### 4.3.1 Существующие пользователи
+
+**Решение:** доводят старую 28-дневную программу до конца. После `status="completed"` им предлагается «начать новую программу» — заходят в новый онбординг.
+
+Принудительная миграция активных пользователей в новую модель — НЕ делаем (слишком сложно совместить старый `day_index` 1-28 с новой логикой периодов).
+
+### 4.3.2 workouts.json → WorkoutTemplate
+
+Скрипт `scripts/migrate_workouts_to_templates.py`:
+- Читает существующие 546 строк
+- Группирует по (level, day_type, version, strength_format)
+- Создаёт записи `WorkoutTemplate` без привязки к day 1-28
+- Тексты упражнений сохраняются 1-в-1 (они хорошо написаны, не перепридумывать)
+- Дополнительно: для тренировок с числами минут — превращаем числа в placeholder'ы `{minutes}` (например «5 мин шаг» → «{warmup_minutes} мин шаг»)
+
+## 4.4 Порядок выполнения работ (10 шагов)
+
+```
+1. Расширить модели User, добавить WeekPlan, WorkoutTemplate
+   + миграционный скрипт + Base.metadata.create_all
+
+2. Создать engine/constants.py (часть VII)
+
+3. Создать engine/week_planner.py + workout_renderer.py
+
+4. Создать engine/week_evaluator.py + period_transitions.py
+
+5. Переписать engine/rule_engine.py (упростить)
+   Удалить engine/fatigue.py
+   Переписать engine/red_flags.py
+
+6. Услуги: создать week_plan_service.py
+   Правки в user_service.py, session_log_service.py
+
+7. Хэндлеры:
+   - onboarding.py — добавить q_continuous_run_test, q_available_days
+   - checkin.py — переключить на WeekPlan + новый rule_engine
+   - workout.py — убрать partial
+   - admin.py — кнопка снятия red flag
+
+8. Scheduler: переписать _check_week_completion
+   Адаптировать _create_daily_logs
+
+9. Скрипт scripts/migrate_workouts_to_templates.py
+
+10. Прогон на тестовых пользователях + написание тестов (см. часть V)
+```
+
+---
+
+# ЧАСТЬ V — ТЕСТЫ (ОБЯЗАТЕЛЬНЫЕ)
+
+## 5.1 `test_week_planner.py`
+
+```
+- 3 дня доступно → правильная раскладка (long + 1 беговая + 1 силовая)
+- 4 дня → правильная раскладка
+- 5 дней → правильная раскладка
+- L3 + 4 дня — раскладка
+- Long ставится на последний доступный день
+- Силовая не ставится за день до long
+- Между беговыми ≥ 1 день без бега (если возможно)
+- L1 base_in → нет интенсивности
+- L1 specialized → может быть интенсивность
+- L2 base → может быть intervals (если условия)
+- L2 preparatory → регулярная интенсивность
+- Интенсивность заменяет одну беговую, не добавляется
+```
+
+## 5.2 `test_rule_engine.py`
+
+```
+- pain==3 → recovery
+- pain==2 → light
+- wellbeing==1 → light
+- sleep==1 → light
+- stress==3 → light
+- день rest → rest
+- всё нормально → base
+- вчера pain==2, сегодня pain==1 → light (1 день)
+- НЕ ИСПОЛЬЗУЕТСЯ: cumulative/severe fatigue
+- НЕ ИСПОЛЬЗУЕТСЯ: «плохо + стресс высокий → recovery»
+```
+
+## 5.3 `test_week_evaluator.py`
+
+```
+- ≥85% выполнения + все ключи + нет боли → growth_eligible=True
+- 80% выполнения → growth_eligible=False
+- 1 день pain==3 → growth_eligible=False
+- 3 дня pain==3 подряд → triggers_rollback=True
+- 3 дня pain==2 подряд → growth_eligible=False, но НЕ откат
+- Light==3 → growth_eligible=False
+- Recovery==2 → growth_eligible=False
+- Не выполнена силовая (ключевая) → growth_eligible=False
+- Recovery в день long → ключевая long не засчитана
+```
+
+## 5.4 `test_progression.py`
+
+```
+- успешная неделя → next_target = actual × 1.10
+- неуспешная → next_target = current_target (удержание)
+- growth_streak == 3 → следующая разгрузочная (×0.6 от пика)
+- weeks_since_recovery == 6 → fail-safe разгрузка
+- после разгрузки → next_target = peak_before_recovery × 1.10
+- next_target не превышает потолок уровня
+- L1 потолок 240, L2 — 300, L3 — 420
+```
+
+## 5.5 `test_rollback.py`
+
+```
+- 3 дня pain==3 подряд → red_flag_active=True
+- При активном flag: weekly_target = last_successful_volume
+- При активном flag: рост заблокирован
+- 1 успешная неделя при flag → flag снимается автоматически
+- Админ снимает flag → откат не применяется, продолжение по плану
+- Recovery в дни боли продолжается даже при активном flag
+```
+
+## 5.6 `test_period_transitions.py`
+
+```
+- L1 base_in → base: 4+ нед, ≥85%, может бежать 20+ мин, нет боли
+- L1 base → specialized: 6+ нед, есть цель, ≥85%, нет боли
+- L1 base → specialized без цели → остаётся в base
+- L2 base → preparatory: 6+ нед, ≥85%, нет боли
+- L2 preparatory → конец цикла: после пика
+- Цикл завершён → пользователю предложение остаться/перейти
+- L3 after break → выход: 4-6 успешных нед + объём + нет боли
+- Максимум цикла достигнут → уведомление тренеру
+```
+
+## 5.7 `test_long_calculations.py`
+
+```
+L1 стадия 1:
+  weekly=90, N=3 → avg=30, long=min(30×1.3, 90×0.35)=min(39,31.5)=31.5≈32 мин
+  weekly=120, N=3 → avg=40, long=min(40×1.3, 120×0.35)=min(52,42)=42 мин
+  weekly=150, N=4 → avg=37.5, long=min(37.5×1.3, 150×0.35)=min(48.75,52.5)=48 мин
+
+L1 стадия 2 (после стабилизации):
+  long независимо ≤ weekly × 0.35
+  растёт +10% от факта
+
+L2:
+  long всегда независимо
+  long ≤ weekly × 0.35
+  long ≤ 300 × 0.35 = 105 мин (потолок)
+
+L3:
+  long ≤ weekly × 0.35
+  long ≤ 420 × 0.35 = 147 мин
+
+Стабилизация L1 (стадия 1 → 2):
+  2 нед без боли + easy ≥ 40 мин → l1_long_independent=True
+  1 нед без боли → НЕ переход
+  2 нед без боли + easy < 40 мин → НЕ переход
+```
+
+## 5.8 `test_intensity_rules.py`
+
+```
+- L1 base_in: tempo/intervals запрещены ВСЕГДА
+- L1 base + program_week<8: tempo/intervals запрещены
+- L1 base + program_week≥8 + условия: можно 1 интенсивная/нед
+- L1 specialized + условия: 1-2 интенсивные/нед
+- L2 base + 3 успешные нед + условия: intervals можно
+- L2 base + 2 успешные нед: intervals НЕЛЬЗЯ
+- L2 preparatory: регулярные tempo+intervals
+- Разгрузочная неделя: интенсивность запрещена
+- Боль за 2 нед: интенсивность запрещена
+- Light≥2 в среднем за 4 нед: интенсивность запрещена
+- Не больше 1 интервальной/нед на любом уровне
+- Интенсивность заменяет беговую, общий объём не растёт
+```
+
+---
+
+# ЧАСТЬ VI — UI/ТЕКСТЫ
+
+## 6.1 Что добавить в `texts.py`
+
+```python
+T.onb.ask_continuous_run_test = "Можешь ли ты пробежать 20+ минут без остановки?"
+T.onb.continuous_run_yes = "Да, могу"
+T.onb.continuous_run_no = "Нет, не могу"
+T.onb.continuous_run_unsure = "Не уверен(а)"
+
+T.onb.ask_available_days = "Выбери дни, в которые тебе удобно тренироваться. Минимум {min_days} дней."
+T.onb.err_available_days_min = "Нужно выбрать минимум {min_days} дней"
+T.onb.day_names = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+
+T.checkin.recovery_week_notice = "Это разгрузочная неделя — снижаем нагрузку для восстановления."
+T.checkin.rollback_notice = "Программа автоматически адаптировалась — возвращаемся к проверенному уровню нагрузки."
+T.checkin.red_flag_active = "Бот зафиксировал боль 3 дня подряд. Нагрузка снижена. Если боль не проходит — обратись к врачу."
+T.checkin.l1_long_stage2 = "Поздравляем! Ты вышел на стабильный уровень — теперь длинные тренировки растут самостоятельно."
+
+T.cycle.completed = "Цикл завершён! Готов перейти на следующий уровень или хочешь остаться на текущем?"
+T.cycle.advance = "Перейти выше"
+T.cycle.stay = "Остаться (повышенная нагрузка)"
+T.cycle.max_reached = "Максимальная длина цикла достигнута. Тренер свяжется с тобой."
+
+T.workout.encouraging_skipped = "Сегодня не получилось — это нормально. Завтра новый день."
+# T.workout.encouraging_partial — УДАЛИТЬ
+```
+
+## 6.2 Что убрать (partial и т. п.)
+
+```
+T.workout.encouraging_partial — удалить
+kb_completion: убрать кнопку partial (только Done и Skipped)
+T.workout.ask_completion_partial — удалить
+T.scheduler.evening_partial — удалить
+ENCOURAGING_MESSAGES["partial"] — удалить
+```
+
+В БД: `completion_status` enum остаётся, но новые записи никогда не пишут "partial". Старые записи — оставить как есть.
+
+## 6.3 Новые шаги онбординга
+
+После `q_longest_run`:
+- Если `q_longest_run` ∈ {0, to_5} → пропустить `q_continuous_run_test` (точно base_in)
+- Иначе → задать `q_continuous_run_test`
+
+После `q_strength_frequency` (Блок 7):
+- `q_available_days` — мультивыбор минимум по уровню
+
+В конце онбординга перед стартом программы:
+- Краткое резюме: уровень, период, доступные дни, недельный объём
+- Кнопка «Начать программу с понедельника»
+
+---
+
+# ЧАСТЬ VII — КОНСТАНТЫ (`engine/constants.py`)
+
+```python
+"""
+Все цифры из методики собраны в одном месте.
+Тренер может править без знания кода.
+"""
+
+# ═════════════════════════════════════════════════════════════════
+# ОБЩИЕ ПАРАМЕТРЫ
+# ═════════════════════════════════════════════════════════════════
+
+GROWTH_MULTIPLIER = 1.10              # +10% при успешной неделе
+RECOVERY_MULTIPLIER = 0.60             # -40% разгрузочная неделя
+SUCCESS_THRESHOLD = 0.85               # 85% единый порог во всей системе
+
+GROWTH_STREAK_FOR_RECOVERY = 3         # 3 успешных недели → разгрузка
+FAILSAFE_WEEKS_WITHOUT_RECOVERY = 6    # принудительная разгрузка
+
+# Light/Recovery как блокер успешной недели
+MAX_LIGHT_DAYS_PER_WEEK = 2            # 3+ → неделя неуспешная
+MAX_RECOVERY_DAYS_PER_WEEK = 1         # 2+ → неделя неуспешная
+
+# Откат
+ROLLBACK_PAIN_DAYS = 3                 # 3 дня pain==3 подряд → red flag
+GROWTH_BLOCK_MILD_PAIN_DAYS = 3        # 3 дня pain==2 подряд → блок роста
+ROLLBACK_AUTO_LIFT_WEEKS = 1           # 1 успешная нед → flag снимается
+
+# Версия Light
+LIGHT_VOLUME_MULTIPLIER = 0.80         # -20% к плановому объёму
+
+# Возврат после боли
+PAIN_RETURN_LIGHT_DAYS = 1             # 1 день Light после боли
+
+
+# ═════════════════════════════════════════════════════════════════
+# УРОВЕНЬ 1 (новичок)
+# ═════════════════════════════════════════════════════════════════
+
+L1_START_VOLUME_BASE_IN = 60           # мин/нед — точка входа base_in
+L1_START_VOLUME_BASE = 120             # мин/нед — точка входа base
+L1_CEILING = 240                       # мин/нед — жёсткий потолок
+
+L1_MIN_DAYS = 3                        # минимум доступных дней
+L1_MAX_RUNNING = 3
+L1_MIN_STRENGTH = 1                    # обязательная, ключевая
+L1_MAX_STRENGTH = 2
+
+L1_CYCLE_MIN_WEEKS = 16
+L1_CYCLE_MAX_WEEKS = 24
+
+L1_PERIOD_MIN_WEEKS = {
+    "base_in": 4,
+    "base": 6,
+    "specialized": 4,
+    "recovery_period": 2,
+}
+
+L1_INTENSITY_MIN_WEEK_OF_PROGRAM = 8   # tempo/intervals не ранее 8 нед
+
+L1_STRENGTH_MINUTES = {
+    "base_in": 30,
+    "base": 30,
+    "specialized": 30,
+}
+
+L1_LONG_RATIO_DEPENDENT = 1.30         # стадия 1: long = avg × 1.3
+L1_LONG_MAX_RATIO = 0.35               # long ≤ 35% недели
+
+# Стадия long: переход 1 → 2
+L1_LONG_STAGE2_NO_PAIN_WEEKS = 2       # 2 недели без боли
+L1_LONG_STAGE2_EASY_THRESHOLD = 40     # easy ≥ 40 мин достигнута
+
+# Зональное распределение L1
+L1_ZONE_DISTRIBUTION = {
+    "z1_z2": 0.80,
+    "z3": 0.15,
+    "z4": 0.05,
+    "z5": 0.00,
+}
+
+
+# ═════════════════════════════════════════════════════════════════
+# УРОВЕНЬ 2 (средний)
+# ═════════════════════════════════════════════════════════════════
+
+L2_START_VOLUME = 150                  # нижняя граница 150-240
+L2_CEILING = 300                       # нижняя граница 300-420
+
+L2_MIN_DAYS = 3
+L2_MAX_RUNNING = 4
+L2_MIN_STRENGTH = 1
+L2_MAX_STRENGTH = 2
+
+L2_CYCLE_MIN_WEEKS = 8
+L2_CYCLE_MAX_WEEKS = 16
+
+L2_PERIOD_MIN_WEEKS = {
+    "base": 6,
+    "preparatory": 6,
+    # разгрузочная — 1 неделя в конце цикла
+}
+
+L2_INTERVALS_AFTER_SUCCESS_WEEKS = 3   # после 3 успешных нед подряд
+
+L2_STRENGTH_MINUTES = {
+    "base": 30,
+    "preparatory": 40,
+}
+
+L2_LONG_MAX_RATIO = 0.35               # ≤ 35% недели и ≤ потолка × 0.35
+
+L2_ZONE_DISTRIBUTION = {
+    "z1_z2": 0.75,
+    "z3": 0.20,
+    "z4": 0.05,
+}
+
+# Параметры тренировок L2
+L2_RECOVERY_RUN_MINUTES = 40
+L2_AEROBIC_RUN_RANGE = (50, 70)
+L2_LONG_RANGE = (70, 100)
+L2_TEMPO_STRUCTURE = {
+    "warmup": 15,
+    "main_min": 15,
+    "main_max": 40,
+    "cooldown": 15,
+    "main_zone": "z3",
+}
+L2_INTERVALS_STRUCTURE = {
+    "warmup": 15,
+    "reps_min": 5,
+    "reps_max": 7,
+    "rep_duration_min": 3,
+    "rep_duration_max": 5,
+    "rep_zone": "z3_z4",
+    "rest_min": 2,
+    "rest_max": 4,
+    "rest_zone": "z1",
+    "cooldown": 15,
+}
+
+
+# ═════════════════════════════════════════════════════════════════
+# УРОВЕНЬ 3 (продвинутый)
+# ═════════════════════════════════════════════════════════════════
+
+L3_START_VOLUME = 180                  # нижняя граница 180-300
+L3_CEILING = 420                       # нижняя граница 420-600
+
+L3_MIN_DAYS = 4                        # больше чем L1/L2
+L3_MAX_RUNNING = 4
+L3_MIN_STRENGTH = 2
+L3_MAX_STRENGTH = 2
+
+L3_CYCLE_MIN_WEEKS = 12
+L3_CYCLE_MAX_WEEKS = 24
+
+L3_PERIOD_MIN_WEEKS = {
+    "base": 8,
+    "preparatory": 8,
+}
+
+L3_STRENGTH_MINUTES = {
+    "base": 40,
+    "preparatory": 50,
+}
+
+L3_LONG_MAX_RATIO = 0.35
+
+L3_ZONE_DISTRIBUTION = {
+    "z1_z2": 0.70,
+    "z3": 0.20,
+    "z4": 0.10,
+}
+
+L3_RECOVERY_RUN_MINUTES = 50
+L3_AEROBIC_RUN_RANGE = (60, 80)
+L3_LONG_RANGE = (90, 130)
+
+
+# ═════════════════════════════════════════════════════════════════
+# УРОВЕНЬ 3 ПОСЛЕ ПЕРЕРЫВА (return-mode)
+# ═════════════════════════════════════════════════════════════════
+
+L3_RETURN_CYCLE_MIN_WEEKS = 8
+L3_RETURN_CYCLE_MAX_WEEKS = 12
+
+L3_RETURN_EXIT_SUCCESS_WEEKS_MIN = 4   # 4-6 успешных нед для выхода
+L3_RETURN_EXIT_SUCCESS_WEEKS_MAX = 6
+L3_RETURN_USES_LEVEL2_LOGIC = True
+
+
+# ═════════════════════════════════════════════════════════════════
+# СТАРТ ЦИКЛА: ПОВЫШЕНИЕ ОБЪЁМА ПРИ ОСТАТКЕ НА УРОВНЕ
+# ═════════════════════════════════════════════════════════════════
+
+STAY_LEVEL_VOLUME_MULTIPLIER = 1.40    # peak × 1.4
+REDO_LEVEL_VOLUME_MULTIPLIER = 1.10    # recovery_volume × 1.10
+
+
+# ═════════════════════════════════════════════════════════════════
+# СТАБИЛЬНОСТЬ ДЛЯ ДОБАВЛЕНИЯ TEMPO/INTERVALS
+# ═════════════════════════════════════════════════════════════════
+
+INTENSITY_REQUIRES_SUCCESSFUL_BLOCK = True     # после 3 рост + разгруз
+INTENSITY_NO_PAIN_RECENT_WEEKS = 2             # последние 2 нед без боли
+INTENSITY_LIGHT_LIMIT_4WEEKS = 2               # средн. Light ≤ 2/нед
+INTENSITY_RECOVERY_LIMIT_4WEEKS = 1            # средн. Recovery ≤ 1/нед
+
+
+# ═════════════════════════════════════════════════════════════════
+# МАКСИМУМ ИНТЕНСИВНЫХ В НЕДЕЛЮ
+# ═════════════════════════════════════════════════════════════════
+
+MAX_INTENSITY_PER_WEEK = {
+    ("L1", "base_in"): 0,
+    ("L1", "base"): 1,                 # tempo ИЛИ intervals
+    ("L1", "specialized"): 2,
+    ("L1", "recovery_period"): 0,
+    ("L2", "base"): 1,
+    ("L2", "preparatory"): 2,
+    ("L3", "base"): 1,
+    ("L3", "preparatory"): 2,
+}
+
+MAX_INTERVALS_PER_WEEK = 1             # на любом уровне/периоде
+```
+
+---
+
+# ЧАСТЬ VIII — РЕЗЮМЕ ДЛЯ ИИ-ИСПОЛНИТЕЛЯ
+
+## 10 главных правил
+
+1. **Старая 28-дневная статическая программа → плавающие циклы 8-24 недели** с динамической генерацией недели по объёму.
+2. **Минуты как единица измерения** (не дни и не км). Силовые в недельный объём НЕ входят.
+3. **Пользователь выбирает доступные дни** (минимум по уровню), система раскладывает.
+4. **Прогрессия**: +10% от факта, ×0.6 разгрузка после 3 успешных недель (или fail-safe 6 недель).
+5. **Условие роста**: ≥85% всех + 3 ключевые + нет «есть» + Light ≤2 + Recovery ≤1.
+6. **Откат при 3 днях боли «есть» подряд** → red_flag → объём last_successful_week.
+7. **Периоды зависят от уровня**: L1 — 4 периода, L2/L3 — 2 периода + разгрузочная неделя.
+8. **Чек-ин определяет версию дня** (Base/Light/Recovery), а не неделю целиком.
+9. **Partial удалить полностью**, оставить done/skipped.
+10. **Tempo/intervals — не раньше 8 нед программы (L1) / 3 успешных недель (L2)**, заменяют беговую, не добавляются.
+
+## Что НЕ трогать
+
+- `bot.py`, `config.py`
+- async/middleware инфраструктура
+- Whitelist (`whitelist_*`)
+- Профильные поля User (имя, страна, часовой пояс)
+- Уровень 5 (performance, ставит тренер вручную)
+- Шкалы чек-ина (значения 1-3, 1-4 совпадают с новой логикой)
+
+## С чего начинать
+
+Шаги в порядке от простого к сложному:
+
+1. **`engine/constants.py`** — собрать все цифры по части VII (5 минут)
+2. **Расширение моделей** — User поля + WeekPlan + WorkoutTemplate
+3. **`engine/week_planner.py`** + **`engine/workout_renderer.py`** — генератор недели
+4. **`engine/week_evaluator.py`** + **`engine/period_transitions.py`** — оценка и переходы
+5. **Переписать `engine/rule_engine.py`**, удалить `fatigue.py`, переписать `red_flags.py`
+6. **Сервисы**: `week_plan_service.py` + правки user/session_log
+7. **Хэндлеры**: онбординг (новые шаги), чек-ин и маркинг (упростить), админка (red flag)
+8. **Scheduler**: переписать недельную проверку
+9. **Скрипт миграции** `workouts.json → WorkoutTemplate`
+10. **Тесты** по части V
+
+## Проверочные вопросы перед коммитом
+
+После каждого шага проверить:
+- [ ] Тесты для этого блока написаны и проходят?
+- [ ] `engine/fatigue.py` удалён? Все ссылки убраны?
+- [ ] Старая `Workout` нигде не используется в новой логике?
+- [ ] Все цифры взяты из `constants.py`, не зашиты в коде?
+- [ ] `partial` нигде не пишется в новые SessionLog?
+- [ ] Существующие пользователи на старой программе не сломались?
+
+---
+
+**КОНЕЦ ДОКУМЕНТА**

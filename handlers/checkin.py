@@ -15,7 +15,7 @@ from engine.rule_engine import decide_workout_version
 from keyboards.builders import (
     kb_main_menu, kb_completion, kb_completion_strength, kb_mark_workout,
     kb_pain_checkin, kb_sleep, kb_stress, kb_wellbeing,
-    kb_yesterday_completion, kb_checkin_approve,
+    kb_yesterday_completion, kb_checkin_approve, kb_checkin_repeat,
 )
 from handlers.utils import safe_answer, filter_strength_text, get_tip_lines, send_workout_to_user
 from services.session_log_service import SessionLogService
@@ -96,9 +96,29 @@ async def cmd_checkin(message: Message, state: FSMContext, session: AsyncSession
         return
 
     log_svc = SessionLogService(session)
+    log = await log_svc.get_today(message.from_user.id)
+    if log and log.checkin_done:
+        await message.answer(T.checkin.already_done_today, reply_markup=kb_checkin_repeat())
+        return
     if await _check_yesterday_and_start(message, state, log_svc):
         return
     await _start_checkin(message, state)
+
+
+@router.callback_query(F.data == "ci:recheck:yes")
+async def ci_recheck_yes(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    await callback.message.edit_reply_markup()
+    await safe_answer(callback)
+    log_svc = SessionLogService(session)
+    if await _check_yesterday_and_start(callback, state, log_svc):
+        return
+    await _start_checkin(callback, state)
+
+
+@router.callback_query(F.data == "ci:recheck:no")
+async def ci_recheck_no(callback: CallbackQuery) -> None:
+    await callback.message.edit_reply_markup()
+    await safe_answer(callback, text=T.checkin.recheck_cancelled)
 
 
 @router.callback_query(F.data == "menu:today")
@@ -155,9 +175,7 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
 
     await callback.message.edit_reply_markup()
     await safe_answer(callback)
-    if await _check_yesterday_and_start(callback, state, log_svc):
-        return
-    await _start_checkin(callback, state)
+    await callback.message.answer(T.checkin.no_checkin_yet, reply_markup=kb_main_menu())
 
 
 # ── Yesterday completion ──────────────────────────────────────────────────────
@@ -201,10 +219,10 @@ async def ci_sleep(callback: CallbackQuery, state: FSMContext) -> None:
 
 # ── Pain info (кнопка «подробнее») ───────────────────────────────────────────
 
-@router.callback_query(CheckinStates.pain, F.data == "ci:pain_info")
+@router.callback_query(F.data == "ci:pain_info")
 async def ci_pain_info(callback: CallbackQuery) -> None:
-    """Всплывашка с расшифровкой уровней боли — выбор кнопок остаётся активным."""
-    await callback.answer(T.checkin.pain_info, show_alert=True)
+    await safe_answer(callback)
+    await callback.message.answer(T.checkin.pain_info)
 
 
 # ── Pain ──────────────────────────────────────────────────────────────────────

@@ -281,6 +281,14 @@ def kb_yesterday_completion() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def kb_checkin_repeat() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text=T.btn.recheck_yes, callback_data="ci:recheck:yes")
+    builder.button(text=T.btn.recheck_no,  callback_data="ci:recheck:no")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
 def kb_pain_increases_checkin() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=T.btn.pain_inc_ci_no,       callback_data="ci:pain_inc:no")
