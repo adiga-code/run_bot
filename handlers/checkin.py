@@ -203,9 +203,8 @@ async def ci_sleep(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(CheckinStates.pain, F.data == "ci:pain_info")
 async def ci_pain_info(callback: CallbackQuery) -> None:
-    """Показываем расшифровку уровней боли, не меняя состояние."""
-    await safe_answer(callback)
-    await callback.message.answer(T.checkin.pain_info, parse_mode="HTML")
+    """Всплывашка с расшифровкой уровней боли — выбор кнопок остаётся активным."""
+    await callback.answer(T.checkin.pain_info, show_alert=True)
 
 
 # ── Pain ──────────────────────────────────────────────────────────────────────
@@ -215,7 +214,13 @@ async def ci_pain(callback: CallbackQuery, state: FSMContext) -> None:
     value = int(callback.data.split(":")[2])
     await state.update_data(pain=value)
     await callback.message.edit_reply_markup()
-    await safe_answer(callback)
+
+    # Для боли ≥ 2 показываем предупреждение об усилении боли в тренировке
+    if value >= 2:
+        await callback.answer(T.checkin.pain_warning, show_alert=True)
+    else:
+        await safe_answer(callback)
+
     await state.set_state(CheckinStates.stress)
     await callback.message.answer(T.checkin.stress_question, reply_markup=kb_stress())
 
