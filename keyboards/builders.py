@@ -375,7 +375,9 @@ def kb_admin_menu() -> InlineKeyboardMarkup:
 def kb_admin_report_users(users: list) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for u in users:
-        builder.button(text=u.full_name, callback_data=f"adm:report:view:{u.telegram_id}")
+        icon = "🏁" if getattr(u, "status", None) == "completed" else ""
+        label = f"{icon} {u.full_name}".strip() if icon else u.full_name
+        builder.button(text=label, callback_data=f"adm:report:view:{u.telegram_id}")
     builder.button(text=T.btn.back, callback_data="adm:menu:back")
     builder.adjust(1)
     return builder.as_markup()

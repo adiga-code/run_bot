@@ -215,7 +215,10 @@ async def cb_admin_reports(callback: CallbackQuery, session: AsyncSession) -> No
 
     result = await session.execute(
         select(User)
-        .where(User.onboarding_complete == True, User.status == "active")
+        .where(
+            User.onboarding_complete == True,
+            User.status.in_(["active", "completed"]),
+        )
         .order_by(User.full_name)
     )
     users = list(result.scalars().all())
@@ -589,7 +592,7 @@ async def admin_jump_day_input(message: Message, state: FSMContext, session: Asy
 
     try:
         target_day = int(message.text.strip())
-        assert 1 <= target_day <= 28
+        assert 1 <= target_day <= 42
     except Exception:
         await message.answer(T.admin.jump_invalid)
         return
@@ -604,7 +607,12 @@ async def admin_jump_day_input(message: Message, state: FSMContext, session: Asy
         return
 
     new_start = date.today() - timedelta(days=target_day - 1)
-    await user_svc.update(user, program_start_date=new_start, week_repeat_count=0)
+    await user_svc.update(
+        user,
+        program_start_date=new_start,
+        week_repeat_count=0,
+        status="active",  # reactivate if user was completed
+    )
 
     from database.models import SessionLog
     await session.execute(
