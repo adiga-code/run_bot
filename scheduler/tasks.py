@@ -33,11 +33,16 @@ async def _reactivate_extended_users(bot: Bot, session_maker: async_sessionmaker
                 User.program_start_date.isnot(None),
             )
         )
+        log_svc = SessionLogService(session)
         completed_extended = result.scalars().all()
         for user in completed_extended:
             raw_day = (date.today() - user.program_start_date).days + 1
             if raw_day <= 42:
                 await user_svc.update(user, status="active")
+                # Create today's session log so the user gets their check-in today
+                day = await user_svc.current_program_day(user)
+                if day is not None:
+                    await log_svc.get_or_create_today(user.telegram_id, day)
                 logger.info(
                     "Auto-reactivated user %s for week 6 (day %d)",
                     user.telegram_id, raw_day,

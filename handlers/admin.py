@@ -401,6 +401,32 @@ async def cb_admin_extend_week5(callback: CallbackQuery, session: AsyncSession) 
 
     await user_svc.update(user, extended_week5=activate)
 
+    # If enabling extension for a completed user still within 42 days → reactivate immediately
+    if activate and user.status == "completed" and user.program_start_date:
+        from datetime import date as _date
+        from services.session_log_service import SessionLogService as _LogSvc
+        raw_day = (_date.today() - user.program_start_date).days + 1
+        if raw_day <= 42:
+            await user_svc.update(user, status="active")
+            # Create today's log so user gets check-in right away
+            log_svc = _LogSvc(session)
+            day = await user_svc.current_program_day(user)
+            if day is not None:
+                await log_svc.get_or_create_today(user_id, day)
+            logger.info("Immediately reactivated completed user %s for week 6 (day %d)", user_id, raw_day)
+            try:
+                await callback.bot.send_message(
+                    chat_id=user_id,
+                    text=(
+                        "🏃 Твоя программа продолжается!\n\n"
+                        "6-я неделя начинается — ты справился, и мы идём дальше. "
+                        "Продолжай в том же темпе 💪"
+                    ),
+                    reply_markup=kb_main_menu(),
+                )
+            except Exception:
+                pass
+
     status_text = T.admin.week5_activated if activate else T.admin.week5_disabled
     await callback.message.answer(
         T.admin.week5_for_user.format(status=status_text, name=user.full_name),
