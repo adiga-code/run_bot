@@ -15,6 +15,47 @@ from texts import T
 logger = logging.getLogger(__name__)
 
 
+async def _reactivate_extended_users(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> None:
+    """
+    Reactivates users with extended_week5=True who were marked 'completed' at day 35
+    but still have days remaining in the extended 6-week program (up to day 42).
+    Runs once on bot startup and then nightly as part of _create_daily_logs.
+    """
+    from sqlalchemy import select as sa_select
+    from database.models import User
+
+    async with session_maker() as session:
+        user_svc = UserService(session)
+        result = await session.execute(
+            sa_select(User).where(
+                User.status == "completed",
+                User.extended_week5 == True,
+                User.program_start_date.isnot(None),
+            )
+        )
+        completed_extended = result.scalars().all()
+        for user in completed_extended:
+            raw_day = (date.today() - user.program_start_date).days + 1
+            if raw_day <= 42:
+                await user_svc.update(user, status="active")
+                logger.info(
+                    "Auto-reactivated user %s for week 6 (day %d)",
+                    user.telegram_id, raw_day,
+                )
+                try:
+                    await bot.send_message(
+                        chat_id=user.telegram_id,
+                        text=(
+                            "🏃 Твоя программа продолжается!\n\n"
+                            "6-я неделя начинается — ты справился, и мы идём дальше. "
+                            "Продолжай в том же темпе 💪"
+                        ),
+                        reply_markup=kb_main_menu(),
+                    )
+                except Exception:
+                    pass
+
+
 async def _create_daily_logs(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> None:
     """
     Run at 00:05 UTC every day.
@@ -22,9 +63,14 @@ async def _create_daily_logs(bot: Bot, session_maker: async_sessionmaker[AsyncSe
     Marks users as 'completed' once the raw calendar day exceeds their program length,
     which stops all further reminders automatically.
     """
+    # Reactivate completed extended users before processing active ones
+    await _reactivate_extended_users(bot, session_maker)
+
     async with session_maker() as session:
         user_svc = UserService(session)
         log_svc = SessionLogService(session)
+
+        # ── Process all active users ─────────────────────────────────────────────
         users = await user_svc.all_active()
         for user in users:
             if not user.program_start_date:
@@ -198,7 +244,18 @@ async def _auto_approve_checkins(bot: Bot, session_maker: async_sessionmaker[Asy
 
 
 def setup_scheduler(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> AsyncIOScheduler:
+    from datetime import datetime, timezone as tz
     scheduler = AsyncIOScheduler(timezone="UTC")
+
+    # On startup: immediately reactivate completed extended users
+    scheduler.add_job(
+        _reactivate_extended_users,
+        "date",
+        run_date=datetime.now(tz.utc),
+        args=[bot, session_maker],
+        id="reactivate_extended_on_startup",
+        replace_existing=True,
+    )
 
     # Every minute: check who needs a morning reminder
     scheduler.add_job(
