@@ -403,7 +403,16 @@ def kb_admin_manage(user_id: int, extended: bool = False) -> InlineKeyboardMarku
         builder.button(text=T.btn.adm_extend_week5, callback_data=f"adm:extend:{user_id}")
     else:
         builder.button(text=T.btn.adm_week5_active, callback_data=f"adm:extend:off:{user_id}")
+    builder.button(text="🗑 Удалить пользователя", callback_data=f"adm:delete:{user_id}")
     builder.button(text=T.btn.back, callback_data=f"adm:report:view:{user_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_admin_delete_confirm(user_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Да, удалить навсегда", callback_data=f"adm:delete:confirm:{user_id}")
+    builder.button(text="❌ Отмена",               callback_data=f"adm:manage:{user_id}")
     builder.adjust(1)
     return builder.as_markup()
 

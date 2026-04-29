@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from handlers.utils import safe_answer
 from keyboards.builders import (
-    kb_admin_application, kb_admin_approve, kb_admin_day_mode, kb_admin_level_picker,
-    kb_admin_manage, kb_admin_mark_day_picker, kb_admin_mark_day_status,
+    kb_admin_application, kb_admin_approve, kb_admin_day_mode, kb_admin_delete_confirm,
+    kb_admin_level_picker, kb_admin_manage, kb_admin_mark_day_picker, kb_admin_mark_day_status,
     kb_admin_menu, kb_admin_report_actions, kb_admin_report_users,
     kb_admin_start_choice, kb_main_menu,
 )
@@ -861,6 +861,63 @@ async def cb_admin_mark_day_set(callback: CallbackQuery, session: AsyncSession) 
         T.admin.day_marked.format(day=day_index, status=T.admin.status_labels.get(status, status)),
         parse_mode="HTML",
         reply_markup=kb_admin_manage(user_id),
+    )
+
+
+# ── User deletion ──────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("adm:delete:") & ~F.data.startswith("adm:delete:confirm:"))
+async def cb_admin_delete_ask(callback: CallbackQuery, session: AsyncSession) -> None:
+    """Show deletion confirmation prompt."""
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    user_id = int(callback.data.split(":")[2])
+    user_svc = UserService(session)
+    user = await user_svc.get(user_id)
+    if not user:
+        await callback.message.answer(T.admin.user_not_found)
+        return
+
+    await callback.message.answer(
+        f"⚠️ <b>Удалить пользователя безвозвратно?</b>\n\n"
+        f"<b>{user.full_name}</b> (ID: <code>{user_id}</code>)\n\n"
+        f"Будут удалены: профиль и все логи тренировок.",
+        parse_mode="HTML",
+        reply_markup=kb_admin_delete_confirm(user_id),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:delete:confirm:"))
+async def cb_admin_delete_confirm(callback: CallbackQuery, session: AsyncSession) -> None:
+    """Permanently delete user and all their session logs."""
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    user_id = int(callback.data.split(":")[3])
+    user_svc = UserService(session)
+    user = await user_svc.get(user_id)
+    if not user:
+        await callback.message.answer(T.admin.user_not_found)
+        return
+
+    full_name = user.full_name
+
+    from database.models import SessionLog, WhitelistEntry
+    await session.execute(delete(SessionLog).where(SessionLog.user_id == user_id))
+    await session.execute(delete(WhitelistEntry).where(WhitelistEntry.telegram_id == user_id))
+    await session.delete(user)
+    await session.commit()
+
+    logger.info("Admin %s permanently deleted user %s (%s)", callback.from_user.id, user_id, full_name)
+    await callback.message.answer(
+        f"🗑 Пользователь <b>{full_name}</b> (ID: <code>{user_id}</code>) удалён.",
+        parse_mode="HTML",
+        reply_markup=kb_admin_menu(),
     )
 
 
