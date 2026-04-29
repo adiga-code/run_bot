@@ -697,6 +697,75 @@ recovery_period (3 недели):
 - L2 / L3 after break: после финальной разгрузочной недели
 - L3 regular: после `recovery_period` (2-3 нед, см. 3.4.5)
 
+### 3.4.5а Взаимодействие weekly unload и recovery_period
+
+**Recovery_period имеет приоритет над weekly unload.**
+
+```
+Если до начала recovery_period осталось ≤ 2 недели:
+  weekly unload пропускается (даже если growth_streak == 3)
+  пользователь идёт сразу в recovery_period
+
+Это предотвращает двойную разгрузку подряд.
+```
+
+Логика в коде:
+```python
+def should_apply_weekly_unload(user, weeks_until_recovery_period: int) -> bool:
+    if weeks_until_recovery_period <= 2:
+        return False  # пропускаем weekly unload, recovery_period приоритетнее
+    return user.growth_streak >= 3 or user.weeks_since_recovery >= 6
+```
+
+### 3.4.5б Поведение evaluator во время recovery_period
+
+**Во время recovery_period рост ОТКЛЮЧЁН:**
+
+```
+НЕ применяются:
+  - Условия успешной недели (3.9.1)
+  - Прогрессия объёма +10% / +15% (3.9.3)
+  - Триггеры weekly unload (3.9.5)
+  - Триггер отката red_flag (3.11.1)
+  - Блокеры роста (Light ≥3, Recovery ≥2)
+
+ПРИМЕНЯЕТСЯ:
+  - Чек-ин и выбор версии тренировки на день (Base/Light/Recovery)
+  - Дневная адаптация по самочувствию
+
+Формула объёма каждую неделю recovery_period:
+  weekly_target = round_int(macrocycle_peak_volume × 0.6)
+  (одна цифра для всех 2-3 недель recovery_period, без роста между ними)
+```
+
+В коде evaluator'а в начале функции:
+```python
+def evaluate_week(week_plan, logs):
+    if week_plan.is_recovery_period:
+        return WeekEvaluation(
+            in_recovery_period=True,
+            growth_eligible=False,
+            triggers_rollback=False,
+            no_growth_reason="recovery_period",
+            # остальные поля для статистики, но не используются для решений
+        )
+    # обычная логика...
+```
+
+### 3.4.5в Начало нового цикла после recovery_period
+
+```
+По окончании recovery_period макроцикл закрывается.
+Автоматически начинается новый макроцикл (того же или нового уровня — см. 3.4.6).
+
+Новый стартовый объём всегда считается от peak предыдущего макроцикла:
+  - Переход на следующий уровень: старт = нижняя граница нового уровня
+                                  (peak от L_old не используется)
+  - Остаться + успешный цикл:     старт = peak_of_last_cycle × 1.40
+  - Провален цикл (на max):       старт = peak_of_last_cycle × 0.60
+                                  (= уровень recovery_period, плавный переход)
+```
+
 ### 3.4.5 Длительность recovery_period для L3 regular
 
 ```
