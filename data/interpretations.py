@@ -6,22 +6,26 @@ All text lives in texts.py → T.interpretations.
 from texts import T
 
 
-def get_interpretation(version: str, checkin_wellbeing: int, red_flag: bool, fatigue_reduction: bool) -> str:
+def get_interpretation(
+    version: str,
+    checkin_wellbeing: int,
+    red_flag: bool,
+    fatigue_reduction: bool,
+    pain_level: int = 1,
+) -> str:
     """
     Return the right interpretation text based on rule engine output.
 
     Priority (mirrors rule_engine.py):
-      rest            → rest
-      red_flag        → red_flag or persistent_pain
-      pain=3          → red_flag  (handled by red_flag=True above)
+      rest             → rest
+      red_flag         → red_flag
       fatigue→recovery → fatigue
-      pain=2          → light_pain
-      pain recovery   → light_pain_recovery  (fatigue_reduction=True, version=light)
-      wellbeing=1     → light_wellbeing
-      sleep/stress    → light_sleep
-      fatigue→light   → fatigue_light
-      base, great wb  → base_great
-      base, ok wb     → base_ok
+      fatigue→light    → fatigue_light  (fatigue_reduction=True, version=light)
+      pain=2           → light_pain
+      wellbeing=1      → light_wellbeing
+      sleep/stress     → light_sleep
+      base, great wb   → base_great
+      base, ok wb      → base_ok
     """
     if version == "rest":
         return T.interpretations.rest
@@ -36,7 +40,10 @@ def get_interpretation(version: str, checkin_wellbeing: int, red_flag: bool, fat
 
     if version == "light":
         if fatigue_reduction:
-            return T.interpretations.light_pain_recovery
+            # накопленная усталость или возврат после боли — оба случая про нагрузку
+            return T.interpretations.fatigue_light
+        if pain_level == 2:
+            return T.interpretations.light_pain
         if checkin_wellbeing == 1:
             return T.interpretations.light_wellbeing
         return T.interpretations.light_sleep

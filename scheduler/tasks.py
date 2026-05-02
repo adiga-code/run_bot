@@ -6,7 +6,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from keyboards.builders import kb_main_menu, kb_mark_workout
+from keyboards.builders import kb_main_menu, kb_mark_workout, kb_absence_reason
 from services.session_log_service import SessionLogService
 from services.user_service import UserService
 from services.workout_service import WorkoutService
@@ -107,6 +107,9 @@ async def _send_morning_reminders(bot: Bot, session_maker: async_sessionmaker[As
     """
     Run every minute. Sends morning check-in reminders to users
     whose local hour matches their morning_reminder_hour.
+
+    Если пользователь не проходил чекин ровно 3 дня — вместо обычного
+    напоминания присылается сообщение «Что случилось?» с кнопками причин.
     """
     utc_hour = datetime.now(timezone.utc).hour
 
@@ -115,11 +118,21 @@ async def _send_morning_reminders(bot: Bot, session_maker: async_sessionmaker[As
         logs = await log_svc.pending_morning_reminder(utc_hour)
         for log in logs:
             try:
-                await bot.send_message(
-                    chat_id=log.user_id,
-                    text=T.scheduler.morning_reminder,
-                    reply_markup=kb_main_menu(),
-                )
+                days_absent = await log_svc.days_since_last_checkin(log.user_id)
+                if days_absent == 3:
+                    # Ветка «3 дня без чекина» — вместо обычного напоминания
+                    await bot.send_message(
+                        chat_id=log.user_id,
+                        text=T.scheduler.absence_3days,
+                        reply_markup=kb_absence_reason(),
+                    )
+                else:
+                    # Обычное утреннее напоминание
+                    await bot.send_message(
+                        chat_id=log.user_id,
+                        text=T.scheduler.morning_reminder,
+                        reply_markup=kb_main_menu(),
+                    )
                 await log_svc.update(log, morning_sent=True)
             except Exception:
                 pass  # user blocked bot or other Telegram error — skip silently

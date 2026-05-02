@@ -11,7 +11,7 @@ from config import settings
 from database.engine import create_db, seed_workouts, session_maker
 from database.middleware import DatabaseMiddleware
 from database.whitelist_middleware import WhitelistMiddleware
-from handlers import admin, checkin, onboarding, progress, reminders, start, workout
+from handlers import admin, checkin, onboarding, progress, reminders, start, workout, absence
 from scheduler.tasks import setup_scheduler
 
 # ================= LOGGING =================
@@ -63,6 +63,7 @@ async def main() -> None:
     dp.include_router(start.router)
     dp.include_router(onboarding.router)
     dp.include_router(checkin.router)
+    dp.include_router(absence.router)
     dp.include_router(workout.router)
     dp.include_router(reminders.router)
     dp.include_router(progress.router)

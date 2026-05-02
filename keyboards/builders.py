@@ -520,10 +520,38 @@ def kb_strength_day_options() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+# ── Absence flow ──────────────────────────────────────────────────────────────
+
+def kb_absence_reason() -> InlineKeyboardMarkup:
+    """Sent when user hasn't checked in for 3 days — ask why."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text=T.btn.absence_tired,      callback_data="absence:tired")
+    builder.button(text=T.btn.absence_no_time,    callback_data="absence:no_time")
+    builder.button(text=T.btn.absence_motivation, callback_data="absence:motivation")
+    builder.button(text=T.btn.absence_sick,       callback_data="absence:sick")
+    builder.button(text=T.btn.absence_weather,    callback_data="absence:weather")
+    builder.button(text=T.btn.absence_other,      callback_data="absence:other")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_return_training() -> InlineKeyboardMarkup:
+    """Follow-up 5 min after absence response — ask if ready to train."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text=T.btn.absence_return_yes, callback_data="absence:return:yes")
+    builder.button(text=T.btn.absence_return_no,  callback_data="absence:return:no")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
 # ── Progress / Main menu ──────────────────────────────────────────────────────
 
-def kb_main_menu() -> InlineKeyboardMarkup:
+def kb_main_menu(checkin_done: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    if checkin_done:
+        builder.button(text=T.btn.menu_edit_checkin,    callback_data="menu:checkin")
+    else:
+        builder.button(text=T.btn.menu_morning_checkin, callback_data="menu:checkin")
     builder.button(text=T.btn.menu_today,     callback_data="menu:today")
     builder.button(text=T.btn.menu_progress,  callback_data="menu:progress")
     builder.button(text=T.btn.menu_reminders, callback_data="menu:reminders")

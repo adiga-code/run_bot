@@ -102,6 +102,23 @@ class SessionLogService:
         )
         return result.scalar_one()
 
+    async def days_since_last_checkin(self, user_id: int) -> int:
+        """
+        Количество дней с момента последнего checkin_done=True.
+        Возвращает 0 если чекин сделан сегодня, 1 — вчера, и т.д.
+        Возвращает 999 если чекин не делался никогда.
+        """
+        result = await self.session.execute(
+            select(SessionLog.date)
+            .where(SessionLog.user_id == user_id, SessionLog.checkin_done == True)
+            .order_by(SessionLog.date.desc())
+            .limit(1)
+        )
+        last_date = result.scalar_one_or_none()
+        if last_date is None:
+            return 999
+        return (date.today() - last_date).days
+
     async def streak(self, user_id: int) -> int:
         """
         Consecutive days the user engaged with the bot (did check-in).

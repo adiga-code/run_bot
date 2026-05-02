@@ -16,6 +16,7 @@ from keyboards.builders import (
     kb_main_menu, kb_completion, kb_completion_strength, kb_mark_workout,
     kb_pain_checkin, kb_sleep, kb_stress, kb_wellbeing,
     kb_yesterday_completion, kb_checkin_approve, kb_checkin_repeat,
+    kb_absence_reason,
 )
 from handlers.utils import safe_answer, filter_strength_text, get_tip_lines, send_workout_to_user
 from services.session_log_service import SessionLogService
@@ -121,6 +122,45 @@ async def ci_recheck_no(callback: CallbackQuery) -> None:
     await safe_answer(callback, text=T.checkin.recheck_cancelled)
 
 
+@router.callback_query(F.data == "menu:checkin")
+async def cb_menu_checkin(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    """
+    Кнопка «Утренний check-in» / «Изменить check-in» в главном меню.
+    - Чекин не пройден → запускаем чекин.
+    - Чекин пройден, тренировка не отмечена → запускаем FSM повторно (изменить).
+    - Тренировка уже отмечена → предупреждение.
+    """
+    user_svc = UserService(session)
+    user = await user_svc.get(callback.from_user.id)
+    if not user or not user.onboarding_complete:
+        await safe_answer(callback, text=T.checkin.not_onboarded_cb, show_alert=True)
+        return
+    if user.status != "active":
+        await safe_answer(callback, text=T.checkin.pending_trainer_cb, show_alert=True)
+        return
+
+    log_svc = SessionLogService(session)
+    log = await log_svc.get_today(callback.from_user.id)
+
+    if log and log.checkin_done:
+        # Тренировка уже выполнена — нельзя менять чекин
+        if log.completion_status is not None:
+            await safe_answer(callback, text=T.checkin.edit_blocked_completed, show_alert=True)
+            return
+        # Тренировка ещё не выполнена — разрешаем изменить чекин
+        await callback.message.edit_reply_markup()
+        await safe_answer(callback)
+        await _start_checkin(callback, state)
+        return
+
+    # Чекин ещё не пройден — обычный старт
+    await callback.message.edit_reply_markup()
+    await safe_answer(callback)
+    if await _check_yesterday_and_start(callback, state, log_svc):
+        return
+    await _start_checkin(callback, state)
+
+
 @router.callback_query(F.data == "menu:today")
 async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     user_svc = UserService(session)
@@ -142,7 +182,7 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
 
         # Waiting for trainer approval — don't show workout yet
         if log.approval_pending:
-            await callback.message.answer(T.checkin.approval_pending, reply_markup=kb_main_menu())
+            await callback.message.answer(T.checkin.approval_pending, reply_markup=kb_main_menu(checkin_done=True))
             return
 
         if log.assigned_workout_id:
@@ -297,7 +337,8 @@ async def _finish_checkin(
     user_is_admin = user_id in settings.admin_ids
 
     # Log stores template_day for workout lookups; calendar_day is derived from log.date.
-    log, _ = await log_svc.get_or_create_today(user_id, template_day)
+    log, created = await log_svc.get_or_create_today(user_id, template_day)
+    is_recheck = not created  # пользователь повторно проходит чекин сегодня
     await log_svc.update(
         log,
         wellbeing=checkin.wellbeing,
@@ -327,13 +368,14 @@ async def _finish_checkin(
         checkin_wellbeing=checkin.wellbeing,
         red_flag=decision.red_flag,
         fatigue_reduction=decision.fatigue_reduction,
+        pain_level=checkin.pain_level,
     )
     await callback.message.answer(interpretation)
 
     if user_is_admin:
         # Send workout directly — no approval card needed
         if decision.version == "rest" or workout is None:
-            await callback.message.answer(T.checkin.rest_day, reply_markup=kb_main_menu())
+            await callback.message.answer(T.checkin.rest_day, reply_markup=kb_main_menu(checkin_done=True))
         else:
             await send_workout_to_user(
                 callback.bot, user_id, template_day,
@@ -342,13 +384,14 @@ async def _finish_checkin(
             )
         return
 
-    await callback.message.answer(T.checkin.waiting_trainer, reply_markup=kb_main_menu())
+    await callback.message.answer(T.checkin.waiting_trainer, reply_markup=kb_main_menu(checkin_done=True))
 
     # Build approval card for non-admin athletes
     day_type_label = _DAY_TYPE_LABELS.get(day_type, day_type)
     history_line = _build_history_line(recent_logs) if decision.fatigue_reduction else ""
+    recheck_suffix = T.checkin.recheck_label if is_recheck else ""
     card = T.checkin.admin_card.format(
-        name=user.full_name,
+        name=user.full_name + recheck_suffix,
         calendar_day=calendar_day,
         day_type=day_type_label,
         wellbeing=_WELLBEING_LABELS.get(checkin.wellbeing, "?"),
