@@ -15,6 +15,7 @@ from keyboards.builders import (
     kb_admin_application, kb_admin_approve, kb_admin_day_mode, kb_admin_delete_confirm,
     kb_admin_level_picker, kb_admin_manage, kb_admin_mark_day_picker, kb_admin_mark_day_status,
     kb_admin_menu, kb_admin_report_actions, kb_admin_report_users,
+    kb_admin_ref_detail, kb_admin_referrals,
     kb_admin_start_choice, kb_main_menu,
 )
 from services.user_service import UserService
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 class AdminActionStates(StatesGroup):
     jump_day = State()
     send_msg = State()
+    ref_name = State()
 
 router = Router()
 
@@ -1281,4 +1283,159 @@ async def cb_set_level_callback(callback: CallbackQuery) -> None:
         T.admin.level_chosen.format(level_name=level_name, level=level_str),
         parse_mode="HTML",
         reply_markup=kb_admin_start_choice(int(user_id_str), int(level_str)),
+    )
+
+
+# ── Referral links ─────────────────────────────────────────────────────────────
+
+async def _show_referrals(target, session: AsyncSession) -> None:
+    from services.referral_service import ReferralService
+    ref_svc = ReferralService(session)
+    links = await ref_svc.get_all()
+    if not links:
+        text = T.admin.ref_menu_empty
+    else:
+        lines = []
+        for link in links:
+            stats = await ref_svc.get_stats(link.code)
+            status = "✅" if link.is_active else "❌"
+            lines.append(T.admin.ref_list_line.format(
+                status=status, name=link.name,
+                total=stats["total"], onboarded=stats["onboarded"], activated=stats["activated"],
+            ))
+        text = T.admin.ref_menu_header.format(count=len(links), lines="\n".join(lines))
+    msg = target.message if isinstance(target, CallbackQuery) else target
+    await msg.answer(text, parse_mode="HTML", reply_markup=kb_admin_referrals(links))
+    if isinstance(target, CallbackQuery):
+        await safe_answer(target)
+
+
+@router.callback_query(F.data == "adm:menu:referrals")
+async def cb_admin_referrals(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await _show_referrals(callback, session)
+
+
+@router.callback_query(F.data == "adm:ref:new")
+async def cb_ref_new(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+    await state.set_state(AdminActionStates.ref_name)
+    await callback.message.answer(T.admin.ref_ask_name)
+
+
+@router.message(AdminActionStates.ref_name)
+async def admin_ref_name_input(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    name = message.text.strip()
+    if not name:
+        await message.answer(T.admin.ref_ask_name)
+        return
+    await state.clear()
+
+    from services.referral_service import ReferralService
+    ref_svc = ReferralService(session)
+    link = await ref_svc.create(name=name, admin_id=message.from_user.id)
+
+    me = await message.bot.get_me()
+    bot_link = f"https://t.me/{me.username}?start={link.code}"
+    await message.answer(
+        T.admin.ref_created.format(name=link.name, link=bot_link),
+        parse_mode="HTML",
+        reply_markup=kb_admin_referrals(await ref_svc.get_all()),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:ref:view:"))
+async def cb_ref_view(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    code = callback.data.split(":", 3)[3]
+    from services.referral_service import ReferralService
+    ref_svc = ReferralService(session)
+    link = await ref_svc.get_by_code(code)
+    if not link:
+        await callback.message.answer(T.admin.ref_not_found)
+        return
+
+    stats = await ref_svc.get_stats(code)
+    me = await callback.bot.get_me()
+    bot_link = f"https://t.me/{me.username}?start={code}"
+    status_label = "активна ✅" if link.is_active else "неактивна ❌"
+    await callback.message.answer(
+        T.admin.ref_detail_header.format(
+            name=link.name, status=status_label,
+            total=stats["total"], onboarded=stats["onboarded"], activated=stats["activated"],
+        ) + f"\n\n🔗 <code>{bot_link}</code>",
+        parse_mode="HTML",
+        reply_markup=kb_admin_ref_detail(code, link.is_active),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:ref:toggle:"))
+async def cb_ref_toggle(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    code = callback.data.split(":", 3)[3]
+    from services.referral_service import ReferralService
+    ref_svc = ReferralService(session)
+    link = await ref_svc.get_by_code(code)
+    if not link:
+        await callback.message.answer(T.admin.ref_not_found)
+        return
+
+    await ref_svc.toggle_active(link)
+    text = T.admin.ref_toggled_on.format(name=link.name) if link.is_active else T.admin.ref_toggled_off.format(name=link.name)
+    await callback.message.answer(text, parse_mode="HTML")
+    await _show_referrals(callback.message, session)
+
+
+@router.callback_query(F.data.startswith("adm:ref:users:"))
+async def cb_ref_users(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+    await safe_answer(callback)
+
+    code = callback.data.split(":", 3)[3]
+    from services.referral_service import ReferralService
+    from services.user_service import UserService as _UserSvc
+    ref_svc = ReferralService(session)
+    user_svc = _UserSvc(session)
+    link = await ref_svc.get_by_code(code)
+    if not link:
+        await callback.message.answer(T.admin.ref_not_found)
+        return
+
+    users = await ref_svc.get_users(code)
+    if not users:
+        await callback.message.answer(
+            T.admin.ref_users_empty,
+            reply_markup=kb_admin_ref_detail(code, link.is_active),
+        )
+        return
+
+    STATUS_MAP = {"active": "активен", "pending": "ожидает", "completed": "завершил"}
+    lines = []
+    for u in users:
+        cal_day = await user_svc.current_calendar_day(u) or "—"
+        status = STATUS_MAP.get(u.status, u.status)
+        lines.append(T.admin.ref_user_line.format(name=u.full_name, status=status, day=cal_day))
+
+    text = T.admin.ref_users_header.format(name=link.name, lines="\n".join(lines))
+    await callback.message.answer(
+        text,
+        parse_mode="HTML",
+        reply_markup=kb_admin_ref_detail(code, link.is_active),
     )

@@ -59,6 +59,7 @@ async def _migrate_db() -> None:
         ("session_logs", "evening_sent",         "BOOLEAN DEFAULT FALSE"),
         ("session_logs", "approval_pending",     "BOOLEAN DEFAULT FALSE"),
         ("session_logs", "checkin_at",           "TIMESTAMP WITH TIME ZONE"),
+        ("users",        "referral_code",        "VARCHAR(50)"),
     ]
     async with engine.begin() as conn:
         for table, column, definition in migrations:

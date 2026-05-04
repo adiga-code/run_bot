@@ -215,8 +215,13 @@ class T:
         adm_users     = "👥 Все пользователи"
         adm_reports   = "📋 Отчёты"
         adm_stats     = "📊 Статистика"
-        adm_whitelist = "🔒 Whitelist"
-        adm_broadcast = "📢 Отправить чек-ин всем"
+        adm_whitelist  = "🔒 Whitelist"
+        adm_broadcast  = "📢 Отправить чек-ин всем"
+        adm_referrals  = "🔗 Реферальные ссылки"
+        adm_ref_new    = "➕ Создать ссылку"
+        adm_ref_toggle_on  = "✅ Активна — деактивировать"
+        adm_ref_toggle_off = "❌ Неактивна — активировать"
+        adm_ref_users  = "👥 Кто пришёл"
 
         # Администратор — управление пользователем
         adm_change_mode   = "🔄 Изменить режим дня"
@@ -829,6 +834,27 @@ class T:
             "✅ Уровень пользователя <code>{user_id}</code> изменён на "
             "<b>{level_name} ({level})</b>."
         )
+
+        # Referral links
+        ref_menu_header    = "🔗 <b>Реферальные ссылки</b>\n\nВсего ссылок: <b>{count}</b>\n\n{lines}"
+        ref_menu_empty     = "🔗 <b>Реферальные ссылки</b>\n\nПока нет ни одной ссылки. Нажми «➕ Создать»."
+        # .format(name=..., code=..., total=..., onboarded=..., activated=..., status=...)
+        ref_list_line      = "{status} <b>{name}</b> — {total} / {onboarded} / {activated}"
+        ref_ask_name       = "Введи название ссылки (например: Instagram, ВКонтакте, Рассылка):"
+        ref_created        = "✅ Ссылка <b>{name}</b> создана!\n\n🔗 <code>{link}</code>\n\nСкопируй и отправь куда нужно."
+        ref_detail_header  = (
+            "🔗 <b>{name}</b>\n"
+            "Статус: {status}\n\n"
+            "👥 Перешли: <b>{total}</b>\n"
+            "📋 Прошли анкету: <b>{onboarded}</b>\n"
+            "✅ Активированы: <b>{activated}</b>"
+        )
+        ref_users_header   = "👥 <b>{name}</b> — пользователи:\n\n{lines}"
+        ref_users_empty    = "Никто ещё не пришёл по этой ссылке."
+        ref_user_line      = "{name} | {status} | день {day}"
+        ref_toggled_on     = "✅ Ссылка <b>{name}</b> активирована."
+        ref_toggled_off    = "❌ Ссылка <b>{name}</b> деактивирована."
+        ref_not_found      = "Ссылка не найдена."
 
     # ══════════════════════════════════════════════════════════════════════════
     # ИНТЕРПРЕТАЦИИ ЧЕК-ИНА
