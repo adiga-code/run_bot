@@ -17,6 +17,7 @@ from keyboards.builders import (
 )
 from handlers.utils import safe_answer
 from services.user_service import UserService
+from texts import T
 
 router = Router()
 
@@ -66,7 +67,7 @@ class OnboardingStates(StatesGroup):
 async def step_last_name(message: Message, state: FSMContext, session: AsyncSession) -> None:
     name = message.text.strip()
     if len(name) < 2:
-        await message.answer("Пожалуйста, введи настоящую фамилию.")
+        await message.answer(T.onb.err_last_name)
         return
 
     user_svc = UserService(session)
@@ -75,7 +76,7 @@ async def step_last_name(message: Message, state: FSMContext, session: AsyncSess
 
     await state.update_data(last_name=name)
     await state.set_state(OnboardingStates.first_name)
-    await message.answer("Введи своё <b>имя</b>:", parse_mode="HTML")
+    await message.answer(T.onb.ask_first_name, parse_mode="HTML")
 
 
 # ── Блок 1: Имя ───────────────────────────────────────────────────────────────
@@ -84,13 +85,13 @@ async def step_last_name(message: Message, state: FSMContext, session: AsyncSess
 async def step_first_name(message: Message, state: FSMContext) -> None:
     name = message.text.strip()
     if len(name) < 2:
-        await message.answer("Пожалуйста, введи настоящее имя.")
+        await message.answer(T.onb.err_first_name)
         return
 
     await state.update_data(first_name=name)
     await state.set_state(OnboardingStates.middle_name)
     await message.answer(
-        "Введи <b>отчество</b> (или пропусти):",
+        T.onb.ask_middle_name,
         parse_mode="HTML",
         reply_markup=kb_skip("onb:skip:middle_name"),
     )
@@ -114,7 +115,7 @@ async def step_middle_name_skip(callback: CallbackQuery, state: FSMContext) -> N
 
 async def _ask_gender(target, state: FSMContext) -> None:
     await state.set_state(OnboardingStates.gender)
-    await target.answer("Укажи <b>пол</b>:", parse_mode="HTML", reply_markup=kb_gender())
+    await target.answer(T.onb.ask_gender, parse_mode="HTML", reply_markup=kb_gender())
 
 
 # ── Блок 1: Пол ───────────────────────────────────────────────────────────────
@@ -126,10 +127,7 @@ async def step_gender(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_reply_markup()
     await safe_answer(callback)
     await state.set_state(OnboardingStates.birth_date)
-    await callback.message.answer(
-        "Укажи <b>дату рождения</b> в формате ДД.ММ.ГГГГ:",
-        parse_mode="HTML",
-    )
+    await callback.message.answer(T.onb.ask_birth_date, parse_mode="HTML")
 
 
 # ── Блок 1: Дата рождения ─────────────────────────────────────────────────────
@@ -141,12 +139,12 @@ async def step_birth_date(message: Message, state: FSMContext) -> None:
         day, month, year = text.split(".")
         birth = date(int(year), int(month), int(day))
     except Exception:
-        await message.answer("Неверный формат. Введи как ДД.ММ.ГГГГ, например 15.06.1990:")
+        await message.answer(T.onb.err_birth_date)
         return
 
     await state.update_data(birth_date=birth.isoformat())
     await state.set_state(OnboardingStates.country)
-    await message.answer("В какой <b>стране</b> ты живёшь?", parse_mode="HTML")
+    await message.answer(T.onb.ask_country, parse_mode="HTML")
 
 
 # ── Блок 1: Страна ────────────────────────────────────────────────────────────
@@ -155,7 +153,7 @@ async def step_birth_date(message: Message, state: FSMContext) -> None:
 async def step_country(message: Message, state: FSMContext) -> None:
     await state.update_data(country=message.text.strip())
     await state.set_state(OnboardingStates.city)
-    await message.answer("В каком <b>городе</b>?", parse_mode="HTML")
+    await message.answer(T.onb.ask_city, parse_mode="HTML")
 
 
 # ── Блок 1: Город ─────────────────────────────────────────────────────────────
@@ -165,7 +163,7 @@ async def step_city(message: Message, state: FSMContext) -> None:
     await state.update_data(city=message.text.strip())
     await state.set_state(OnboardingStates.district)
     await message.answer(
-        "Укажи <b>район</b> (или пропусти):",
+        T.onb.ask_district,
         parse_mode="HTML",
         reply_markup=kb_skip("onb:skip:district"),
     )
@@ -190,7 +188,7 @@ async def step_district_skip(callback: CallbackQuery, state: FSMContext) -> None
 async def _ask_timezone(target, state: FSMContext) -> None:
     await state.set_state(OnboardingStates.timezone)
     await target.answer(
-        "Выбери свой <b>часовой пояс</b>:",
+        T.onb.ask_timezone,
         parse_mode="HTML",
         reply_markup=kb_timezone(),
     )
@@ -206,8 +204,7 @@ async def step_timezone(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await state.set_state(OnboardingStates.q_goal)
     await callback.message.answer(
-        "Отлично! Теперь несколько вопросов о беге.\n\n"
-        "<b>Какая у тебя основная цель?</b>",
+        T.onb.ask_goal,
         parse_mode="HTML",
         reply_markup=kb_goal(),
     )
@@ -225,14 +222,14 @@ async def step_q_goal(callback: CallbackQuery, state: FSMContext) -> None:
     if value == "distance":
         await state.set_state(OnboardingStates.q_distance)
         await callback.message.answer(
-            "<b>Какая дистанция?</b>",
+            T.onb.ask_distance,
             parse_mode="HTML",
             reply_markup=kb_distance(),
         )
     else:
         await state.set_state(OnboardingStates.q_runs)
         await callback.message.answer(
-            "<b>Ты бегаешь сейчас?</b>",
+            T.onb.ask_runs,
             parse_mode="HTML",
             reply_markup=kb_runs(),
         )
@@ -248,8 +245,7 @@ async def step_q_distance(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await state.set_state(OnboardingStates.q_race_date)
     await callback.message.answer(
-        "<b>Когда старт / гонка?</b>\n\n"
-        "Напиши примерную дату (например: <i>15.06.2026</i> или <i>июнь 2026</i>)",
+        T.onb.ask_race_date,
         parse_mode="HTML",
         reply_markup=kb_skip("onb:skip:race_date"),
     )
@@ -259,11 +255,7 @@ async def step_q_distance(callback: CallbackQuery, state: FSMContext) -> None:
 async def step_q_race_date(message: Message, state: FSMContext) -> None:
     await state.update_data(q_race_date=message.text.strip())
     await state.set_state(OnboardingStates.q_runs)
-    await message.answer(
-        "<b>Ты бегаешь сейчас?</b>",
-        parse_mode="HTML",
-        reply_markup=kb_runs(),
-    )
+    await message.answer(T.onb.ask_runs, parse_mode="HTML", reply_markup=kb_runs())
 
 
 @router.callback_query(OnboardingStates.q_race_date, F.data == "onb:skip:race_date")
@@ -272,11 +264,7 @@ async def step_q_race_date_skip(callback: CallbackQuery, state: FSMContext) -> N
     await callback.message.edit_reply_markup()
     await safe_answer(callback)
     await state.set_state(OnboardingStates.q_runs)
-    await callback.message.answer(
-        "<b>Ты бегаешь сейчас?</b>",
-        parse_mode="HTML",
-        reply_markup=kb_runs(),
-    )
+    await callback.message.answer(T.onb.ask_runs, parse_mode="HTML", reply_markup=kb_runs())
 
 
 # ── Блок 3: Бегает? ───────────────────────────────────────────────────────────
@@ -298,14 +286,14 @@ async def step_q_runs(callback: CallbackQuery, state: FSMContext) -> None:
         )
         await state.set_state(OnboardingStates.q_experience)
         await callback.message.answer(
-            "<b>Как давно ты занимаешься бегом?</b>",
+            T.onb.ask_experience,
             parse_mode="HTML",
             reply_markup=kb_experience(),
         )
     else:
         await state.set_state(OnboardingStates.q_frequency)
         await callback.message.answer(
-            "<b>Как часто ты бегаешь?</b>",
+            T.onb.ask_frequency,
             parse_mode="HTML",
             reply_markup=kb_frequency(),
         )
@@ -321,7 +309,7 @@ async def step_q_frequency(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await state.set_state(OnboardingStates.q_volume)
     await callback.message.answer(
-        "<b>Сколько км в неделю ты пробегаешь?</b>",
+        T.onb.ask_volume,
         parse_mode="HTML",
         reply_markup=kb_volume(),
     )
@@ -337,7 +325,7 @@ async def step_q_volume(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await state.set_state(OnboardingStates.q_longest_run)
     await callback.message.answer(
-        "<b>Какой самый длинный бег за последнее время?</b>",
+        T.onb.ask_longest_run,
         parse_mode="HTML",
         reply_markup=kb_longest_run(),
     )
@@ -353,7 +341,7 @@ async def step_q_longest_run(callback: CallbackQuery, state: FSMContext) -> None
     await safe_answer(callback)
     await state.set_state(OnboardingStates.q_structure)
     await callback.message.answer(
-        "<b>Есть ли у тебя план или система в тренировках?</b>",
+        T.onb.ask_structure,
         parse_mode="HTML",
         reply_markup=kb_structure(),
     )
@@ -369,7 +357,7 @@ async def step_q_structure(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await state.set_state(OnboardingStates.q_experience)
     await callback.message.answer(
-        "<b>Как давно ты занимаешься бегом?</b>",
+        T.onb.ask_experience,
         parse_mode="HTML",
         reply_markup=kb_experience(),
     )
@@ -385,7 +373,7 @@ async def step_q_experience(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await state.set_state(OnboardingStates.q_break)
     await callback.message.answer(
-        "<b>Был ли перерыв в беге?</b>",
+        T.onb.ask_break,
         parse_mode="HTML",
         reply_markup=kb_break(),
     )
@@ -410,14 +398,14 @@ async def step_q_break(callback: CallbackQuery, state: FSMContext) -> None:
     if runs:
         await state.set_state(OnboardingStates.q_run_feel)
         await callback.message.answer(
-            "<b>Как тебе даётся бег?</b>",
+            T.onb.ask_run_feel,
             parse_mode="HTML",
             reply_markup=kb_run_feel(),
         )
     else:
         await state.set_state(OnboardingStates.q_pain)
         await callback.message.answer(
-            "<b>Есть ли сейчас боли или дискомфорт в ногах / суставах?</b>",
+            T.onb.ask_pain_no_runs,
             parse_mode="HTML",
             reply_markup=kb_pain(),
         )
@@ -433,7 +421,7 @@ async def step_q_run_feel(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await state.set_state(OnboardingStates.q_pain)
     await callback.message.answer(
-        "<b>Есть ли сейчас боли или дискомфорт при беге / после?</b>",
+        T.onb.ask_pain,
         parse_mode="HTML",
         reply_markup=kb_pain(),
     )
@@ -458,8 +446,7 @@ async def step_q_pain(callback: CallbackQuery, state: FSMContext) -> None:
     else:
         await state.set_state(OnboardingStates.q_pain_location)
         await callback.message.answer(
-            "<b>Где чаще всего возникает дискомфорт?</b>\n"
-            "Можно выбрать несколько вариантов.",
+            T.onb.ask_pain_location,
             parse_mode="HTML",
             reply_markup=kb_pain_location([]),
         )
@@ -479,7 +466,7 @@ async def step_q_pain_location(callback: CallbackQuery, state: FSMContext) -> No
         await safe_answer(callback)
         await state.set_state(OnboardingStates.q_pain_increases)
         await callback.message.answer(
-            "<b>Усиливается ли боль при нагрузке?</b>",
+            T.onb.ask_pain_increases,
             parse_mode="HTML",
             reply_markup=kb_pain_increases(),
         )
@@ -505,7 +492,7 @@ async def step_q_pain_increases(callback: CallbackQuery, state: FSMContext) -> N
     await safe_answer(callback)
     await state.set_state(OnboardingStates.q_injury_history)
     await callback.message.answer(
-        "<b>Были ли травмы за последний год?</b>",
+        T.onb.ask_injury_history,
         parse_mode="HTML",
         reply_markup=kb_injury_history(),
     )
@@ -528,8 +515,7 @@ async def _ask_other_sports(target, state: FSMContext) -> None:
     await state.update_data(q_other_sports_list=[])
     await state.set_state(OnboardingStates.q_other_sports)
     await target.answer(
-        "<b>Занимаешься ли чем-то кроме бега?</b>\n"
-        "Можно выбрать несколько вариантов.",
+        T.onb.ask_other_sports,
         parse_mode="HTML",
         reply_markup=kb_other_sports([]),
     )
@@ -547,7 +533,7 @@ async def step_q_other_sports(callback: CallbackQuery, state: FSMContext) -> Non
         await safe_answer(callback)
         await state.set_state(OnboardingStates.q_strength_frequency)
         await callback.message.answer(
-            "<b>Делаешь ли силовые тренировки?</b>",
+            T.onb.ask_strength_freq,
             parse_mode="HTML",
             reply_markup=kb_strength_frequency(),
         )
@@ -578,7 +564,7 @@ async def step_q_strength_frequency(callback: CallbackQuery, state: FSMContext) 
     await safe_answer(callback)
     await state.set_state(OnboardingStates.q_location)
     await callback.message.answer(
-        "<b>Где планируешь делать силовые тренировки?</b>",
+        T.onb.ask_location,
         parse_mode="HTML",
         reply_markup=kb_location(),
     )
@@ -594,7 +580,7 @@ async def step_q_location(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await state.set_state(OnboardingStates.q_self_level)
     await callback.message.answer(
-        "<b>Как ты оцениваешь свой уровень как бегун?</b>",
+        T.onb.ask_self_level,
         parse_mode="HTML",
         reply_markup=kb_self_level(),
     )
@@ -686,75 +672,46 @@ async def step_q_self_level(callback: CallbackQuery, state: FSMContext, session:
         q_self_level=data.get("q_self_level"),
     )
 
-    await callback.message.answer(
-        "✅ <b>Анкета заполнена!</b>\n\n"
-        "Я сохранил твои данные.\n"
-        "Тренер проверит анкету и назначит тебе тренировочный план.",
-        parse_mode="HTML",
-    )
+    await callback.message.answer(T.onb.complete, parse_mode="HTML")
 
     # ── Уведомление тренеру ───────────────────────────────────────────────────
     tg_link = f"@{callback.from_user.username}" if callback.from_user.username else f"id:{callback.from_user.id}"
 
-    goal_labels = {
-        "start_zero": "Начать с нуля",
-        "return":     "Вернуться после перерыва",
-        "distance":   "Пробежать дистанцию",
-        "improve":    "Улучшить результат",
-        "no_pain":    "Бегать без боли",
-        "health":     "Общее здоровье и форма",
-    }
-    dist_labels    = {"5k": "5 км", "10k": "10 км", "half": "Полумарафон", "full": "Марафон", "other": "Другая"}
-    runs_labels    = {"no": "Нет", "irregular": "Нерегулярно", "regular": "Регулярно"}
-    freq_labels    = {"0_1": "0–1 р/нед", "2_3": "2–3 р/нед", "4plus": "4+ р/нед"}
-    vol_labels     = {"to_10": "до 10 км", "10_25": "10–25 км", "25_50": "25–50 км", "50plus": "50+ км"}
-    longest_labels = {"to_5": "до 5 км", "5_10": "5–10 км", "10_15": "10–15 км", "15plus": "15+ км"}
-    exp_labels     = {"beginner": "Только начинаю", "to_6m": "до 6 мес", "6_12m": "6–12 мес", "1_3y": "1–3 года", "3plus": "3+ лет"}
-    break_labels   = {"no": "Нет", "to_1m": "до 1 мес", "1_3m": "1–3 мес", "3_6m": "3–6 мес", "6plus": "6+ мес"}
-    feel_labels    = {"hard": "Тяжело", "medium": "Нормально", "easy": "Комфортно"}
-    pain_labels    = {"none": "Нет", "little": "Иногда", "yes": "Регулярно"}
-    pain_inc_lbl   = {"no": "Нет", "yes": "Усиливается", "not_sure": "Не уверен(а)"}
-    str_freq_lbl   = {"no": "Не делаю", "sometimes": "Иногда", "regularly": "Регулярно"}
-    self_lbl       = {"beginner": "Новичок", "base": "Базовый", "medium": "Средний", "advanced": "Продвинутый"}
-    gender_lbl     = {"m": "Мужской", "f": "Женский"}
-
-    pain_loc = data.get("q_pain_location") or "—"
-    sports   = data.get("q_other_sports") or "—"
-
-    admin_text = (
-        f"👤 <b>Новый пользователь ждёт подтверждения!</b>\n\n"
-        f"Имя: <b>{full_name}</b>\n"
-        f"Telegram: {tg_link}\n"
-        f"ID: <code>{callback.from_user.id}</code>\n"
-        f"Пол: {gender_lbl.get(data.get('gender', ''), '—')}\n"
-        f"Город: {data.get('city') or '—'}\n"
-        f"Район: {data.get('district') or '—'}\n\n"
-        f"<b>Цель:</b> {goal_labels.get(data.get('q_goal', ''), '—')}\n"
-        + (
-            f"• Дистанция: {dist_labels.get(data.get('q_distance', ''), '—')}\n"
-            f"• Дата старта: {data.get('q_race_date') or '—'}\n"
-            if data.get("q_goal") == "distance" else ""
+    distance_block = ""
+    if data.get("q_goal") == "distance":
+        distance_block = T.onb.admin_distance_block.format(
+            distance=T.onb.dist_labels.get(data.get("q_distance", ""), "—"),
+            race_date=data.get("q_race_date") or "—",
         )
-        + f"\n<b>Бег:</b>\n"
-        f"• Бегает: {runs_labels.get(data.get('q_runs', 'no'), '—')}\n"
-        f"• Частота: {freq_labels.get(data.get('q_frequency', ''), '—')}\n"
-        f"• Объём: {vol_labels.get(data.get('q_volume', ''), '—')}\n"
-        f"• Самый длинный: {longest_labels.get(data.get('q_longest_run', ''), '—')}\n"
-        f"• Как даётся: {feel_labels.get(data.get('q_run_feel', ''), '—')}\n\n"
-        f"<b>Опыт:</b>\n"
-        f"• Стаж: {exp_labels.get(data.get('q_experience', ''), '—')}\n"
-        f"• Перерыв: {break_labels.get(data.get('q_break_duration', 'no'), '—')}\n\n"
-        f"<b>Здоровье:</b>\n"
-        f"• Боль: {pain_labels.get(data.get('q_pain', 'none'), '—')}\n"
-        f"• Где: {pain_loc}\n"
-        f"• Усиливается: {pain_inc_lbl.get(data.get('q_pain_increases', 'no'), '—')}\n"
-        f"• Травмы за год: {'Да' if data.get('q_injury_history') == 'yes' else 'Нет'}\n\n"
-        f"<b>Физическая форма:</b>\n"
-        f"• Другой спорт: {sports}\n"
-        f"• Силовые: {str_freq_lbl.get(data.get('q_strength_frequency', ''), '—')}\n"
-        f"• Силовые где: {'🏋️ Зал' if location == 'gym' else '🏠 Дома'}\n\n"
-        f"<b>Самооценка:</b> {self_lbl.get(data.get('q_self_level', ''), '—')}\n\n"
-        f"🤖 Автоматический уровень: <b>{level_names[level]} ({level})</b>"
+
+    strength_location = (
+        T.onb.admin_location_gym if location == "gym" else T.onb.admin_location_home
+    )
+
+    admin_text = T.onb.admin_notification.format(
+        full_name=full_name,
+        tg_link=tg_link,
+        user_id=callback.from_user.id,
+        gender=T.onb.gender_labels.get(data.get("gender", ""), "—"),
+        goal=T.onb.goal_labels.get(data.get("q_goal", ""), "—"),
+        distance_block=distance_block,
+        runs=T.onb.runs_labels.get(data.get("q_runs", "no"), "—"),
+        frequency=T.onb.freq_labels.get(data.get("q_frequency", ""), "—"),
+        volume=T.onb.vol_labels.get(data.get("q_volume", ""), "—"),
+        longest=T.onb.longest_labels.get(data.get("q_longest_run", ""), "—"),
+        feel=T.onb.feel_labels.get(data.get("q_run_feel", ""), "—"),
+        experience=T.onb.exp_labels.get(data.get("q_experience", ""), "—"),
+        break_duration=T.onb.break_labels.get(data.get("q_break_duration", "no"), "—"),
+        pain=T.onb.pain_labels.get(data.get("q_pain", "none"), "—"),
+        pain_location=data.get("q_pain_location") or "—",
+        pain_increases=T.onb.pain_inc_labels.get(data.get("q_pain_increases", "no"), "—"),
+        injury=T.onb.admin_injury_yes if data.get("q_injury_history") == "yes" else T.onb.admin_injury_no,
+        sports=data.get("q_other_sports") or "—",
+        strength_freq=T.onb.str_freq_labels.get(data.get("q_strength_frequency", ""), "—"),
+        strength_location=strength_location,
+        self_level=T.onb.self_level_labels.get(data.get("q_self_level", ""), "—"),
+        level_name=level_names[level],
+        level=level,
     )
 
     for admin_id in settings.admin_ids:

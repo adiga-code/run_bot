@@ -52,7 +52,9 @@
       "Bash(cd /c/Users/Hezh PC/Desktop/projects/фриланс_19_03/data)",
       "Bash(python -c ':*)",
       "Bash(python scripts/add_week5.py)",
-      "Bash(python -m py_compile handlers/admin.py services/user_service.py scheduler/tasks.py database/models.py database/engine.py keyboards/builders.py)"
+      "Bash(python -m py_compile handlers/admin.py services/user_service.py scheduler/tasks.py database/models.py database/engine.py keyboards/builders.py)",
+      "Bash(python -c ' *)",
+      "Bash(python scripts/add_week6.py)"
     ]
   }
 }

@@ -6,21 +6,25 @@ FATIGUE_WINDOW = 3
 @dataclass
 class RecentLogData:
     effort_level: int | None       # 1-5 (5=max effort), None if skipped
-    sleep_quality: int             # 1=плохо, 2=нормально, 3=хорошо
+    sleep_quality: int             # 1=плохо, 2=средне, 3=хорошо
     completion_status: str | None  # done / partial / skipped
-    wellbeing: int = 3             # 1=плохо, 2=тяжеловато, 3=нормально, 4=хорошо, 5=отлично
-    stress_level: int = 1          # 1=нет, 2=умеренный, 3=сильный
+    wellbeing: int = 2             # 1=плохо, 2=нормально, 3=отлично
+    stress_level: int = 1          # 1=низкий, 2=средний, 3=высокий
     day_type: str | None = None    # run / strength / recovery / rest
     pain_level: int = 1            # 1=нет, 2=немного, 3=есть
 
 
 def _is_tough_day(log: RecentLogData) -> bool:
     """
-    A day is "tough" if wellbeing ≤ 2 (тяжеловато/плохо),
-    or stress >= 2, or sleep is bad, or high effort, or workout was partial/skipped,
-    or any pain reported.
+    День считается «тяжёлым» если:
+    - самочувствие плохо (1)
+    - стресс средний или высокий (>= 2)
+    - сон плохой (1)
+    - высокое усилие (>= 4)
+    - тренировка выполнена частично или пропущена
+    - есть какая-либо боль (>= 2)
     """
-    if log.wellbeing <= 2:
+    if log.wellbeing == 1:
         return True
     if log.stress_level >= 2:
         return True
@@ -37,8 +41,8 @@ def _is_tough_day(log: RecentLogData) -> bool:
 
 def detect_cumulative_fatigue(recent_logs: list[RecentLogData]) -> bool:
     """
-    Returns True if 2+ of the last 3 days were "tough".
-    Triggers automatic load reduction (base → light).
+    Возвращает True если 2+ из последних 3 дней были «тяжёлыми».
+    Триггер для снижения нагрузки (base → light).
     """
     window = recent_logs[-FATIGUE_WINDOW:]
     if len(window) < 2:
@@ -49,8 +53,8 @@ def detect_cumulative_fatigue(recent_logs: list[RecentLogData]) -> bool:
 
 def detect_severe_fatigue(recent_logs: list[RecentLogData]) -> bool:
     """
-    Returns True if ALL 3 of the last 3 days were "tough".
-    Triggers forced recovery day.
+    Возвращает True если ВСЕ 3 последних дня были «тяжёлыми».
+    Триггер для принудительного дня восстановления.
     """
     window = recent_logs[-FATIGUE_WINDOW:]
     return len(window) >= 3 and all(_is_tough_day(log) for log in window)
@@ -58,8 +62,8 @@ def detect_severe_fatigue(recent_logs: list[RecentLogData]) -> bool:
 
 def detect_persistent_pain(recent_logs: list[RecentLogData]) -> bool:
     """
-    Returns True if pain_level >= 2 was reported on 2 or more of the last 3 days.
-    Persistent pain is a safety signal that should override Light and force Recovery.
+    Возвращает True если боль >= 2 была 2 или более дней из последних 3.
+    Красный флаг: боль «немного» 2 дня подряд → Recovery.
     """
     window = recent_logs[-FATIGUE_WINDOW:]
     if len(window) < 2:

@@ -11,7 +11,7 @@ from config import settings
 from database.engine import create_db, seed_workouts, session_maker
 from database.middleware import DatabaseMiddleware
 from database.whitelist_middleware import WhitelistMiddleware
-from handlers import admin, checkin, onboarding, progress, reminders, start, workout
+from handlers import admin, checkin, onboarding, progress, reminders, start, workout, absence
 from scheduler.tasks import setup_scheduler
 
 # ================= LOGGING =================
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 async def main() -> None:
     # 🔥 ПРОКСИ
-    proxy_url = "http://cCxo2n:8rbnxc@194.59.8.97:1733"
+    proxy_url = "http://9_Xa3l:0e1rli@140.99.236.18:3042"
 
     session = AiohttpSession(proxy=proxy_url)
 
@@ -63,6 +63,7 @@ async def main() -> None:
     dp.include_router(start.router)
     dp.include_router(onboarding.router)
     dp.include_router(checkin.router)
+    dp.include_router(absence.router)
     dp.include_router(workout.router)
     dp.include_router(reminders.router)
     dp.include_router(progress.router)

@@ -6,12 +6,59 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from keyboards.builders import kb_main_menu, kb_mark_workout
+from keyboards.builders import kb_main_menu, kb_mark_workout, kb_absence_reason
 from services.session_log_service import SessionLogService
 from services.user_service import UserService
 from services.workout_service import WorkoutService
+from texts import T
 
 logger = logging.getLogger(__name__)
+
+
+async def _reactivate_extended_users(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> None:
+    """
+    Reactivates users with extended_week5=True who were marked 'completed' at day 35
+    but still have days remaining in the extended 6-week program (up to day 42).
+    Runs once on bot startup and then nightly as part of _create_daily_logs.
+    """
+    from sqlalchemy import select as sa_select
+    from database.models import User
+
+    async with session_maker() as session:
+        user_svc = UserService(session)
+        result = await session.execute(
+            sa_select(User).where(
+                User.status == "completed",
+                User.extended_week5 == True,
+                User.program_start_date.isnot(None),
+            )
+        )
+        log_svc = SessionLogService(session)
+        completed_extended = result.scalars().all()
+        for user in completed_extended:
+            raw_day = (date.today() - user.program_start_date).days + 1
+            if raw_day <= 42:
+                await user_svc.update(user, status="active")
+                # Create today's session log so the user gets their check-in today
+                day = await user_svc.current_program_day(user)
+                if day is not None:
+                    await log_svc.get_or_create_today(user.telegram_id, day)
+                logger.info(
+                    "Auto-reactivated user %s for week 6 (day %d)",
+                    user.telegram_id, raw_day,
+                )
+                try:
+                    await bot.send_message(
+                        chat_id=user.telegram_id,
+                        text=(
+                            "🏃 Твоя программа продолжается!\n\n"
+                            "6-я неделя начинается — ты справился, и мы идём дальше. "
+                            "Продолжай в том же темпе 💪"
+                        ),
+                        reply_markup=kb_main_menu(),
+                    )
+                except Exception:
+                    pass
 
 
 async def _create_daily_logs(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> None:
@@ -21,9 +68,14 @@ async def _create_daily_logs(bot: Bot, session_maker: async_sessionmaker[AsyncSe
     Marks users as 'completed' once the raw calendar day exceeds their program length,
     which stops all further reminders automatically.
     """
+    # Reactivate completed extended users before processing active ones
+    await _reactivate_extended_users(bot, session_maker)
+
     async with session_maker() as session:
         user_svc = UserService(session)
         log_svc = SessionLogService(session)
+
+        # ── Process all active users ─────────────────────────────────────────────
         users = await user_svc.all_active()
         for user in users:
             if not user.program_start_date:
@@ -55,6 +107,9 @@ async def _send_morning_reminders(bot: Bot, session_maker: async_sessionmaker[As
     """
     Run every minute. Sends morning check-in reminders to users
     whose local hour matches their morning_reminder_hour.
+
+    Если пользователь не проходил чекин ровно 3 дня — вместо обычного
+    напоминания присылается сообщение «Что случилось?» с кнопками причин.
     """
     utc_hour = datetime.now(timezone.utc).hour
 
@@ -63,15 +118,21 @@ async def _send_morning_reminders(bot: Bot, session_maker: async_sessionmaker[As
         logs = await log_svc.pending_morning_reminder(utc_hour)
         for log in logs:
             try:
-                await bot.send_message(
-                    chat_id=log.user_id,
-                    text=(
-                        "🌅 Доброе утро!\n\n"
-                        "Время пройти утренний чек-ин и узнать свою тренировку на сегодня.\n\n"
-                        "Нажми /checkin или кнопку ниже 👇"
-                    ),
-                    reply_markup=kb_main_menu(),
-                )
+                days_absent = await log_svc.days_since_last_checkin(log.user_id)
+                if days_absent == 3:
+                    # Ветка «3 дня без чекина» — вместо обычного напоминания
+                    await bot.send_message(
+                        chat_id=log.user_id,
+                        text=T.scheduler.absence_3days,
+                        reply_markup=kb_absence_reason(),
+                    )
+                else:
+                    # Обычное утреннее напоминание
+                    await bot.send_message(
+                        chat_id=log.user_id,
+                        text=T.scheduler.morning_reminder,
+                        reply_markup=kb_main_menu(),
+                    )
                 await log_svc.update(log, morning_sent=True)
             except Exception:
                 pass  # user blocked bot or other Telegram error — skip silently
@@ -131,32 +192,17 @@ async def _send_evening_reminders(bot: Bot, session_maker: async_sessionmaker[As
             checkin_done = log.checkin_done
 
             if status == "done":
-                text = (
-                    "🌙 Отличный день!\n\n"
-                    "Тренировка выполнена — это и есть прогресс. "
-                    "Дай телу восстановиться до завтра 💪"
-                )
+                text = T.scheduler.evening_done
                 markup = None
             elif status == "partial":
-                text = (
-                    "🌙 Хорошая работа!\n\n"
-                    "Частичная тренировка — тоже движение вперёд. "
-                    "Завтра продолжаем 🙌"
-                )
+                text = T.scheduler.evening_partial
                 markup = None
             elif checkin_done and not status:
-                text = (
-                    "🌙 Напоминание!\n\n"
-                    "Ты сегодня занимался(ась)? Отметь результат — "
-                    "это помогает отслеживать твой прогресс 👇"
-                )
+                text = T.scheduler.evening_reminder
                 markup = kb_mark_workout()
             else:
                 # No checkin and no status
-                text = (
-                    "🌙 Похоже, сегодня выпал день — ничего страшного.\n\n"
-                    "Завтра возвращаемся в ритм 🙌"
-                )
+                text = T.scheduler.evening_missed
                 markup = None
 
             try:
@@ -191,7 +237,7 @@ async def _auto_approve_checkins(bot: Bot, session_maker: async_sessionmaker[Asy
                 if version == "rest":
                     await bot.send_message(
                         chat_id=log.user_id,
-                        text="😴 Сегодня день отдыха. Позволь телу восстановиться.",
+                        text=T.scheduler.rest_day,
                         reply_markup=kb_main_menu(),
                     )
                 else:
@@ -216,7 +262,18 @@ async def _auto_approve_checkins(bot: Bot, session_maker: async_sessionmaker[Asy
 
 
 def setup_scheduler(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> AsyncIOScheduler:
+    from datetime import datetime, timezone as tz
     scheduler = AsyncIOScheduler(timezone="UTC")
+
+    # On startup: immediately reactivate completed extended users
+    scheduler.add_job(
+        _reactivate_extended_users,
+        "date",
+        run_date=datetime.now(tz.utc),
+        args=[bot, session_maker],
+        id="reactivate_extended_on_startup",
+        replace_existing=True,
+    )
 
     # Every minute: check who needs a morning reminder
     scheduler.add_job(

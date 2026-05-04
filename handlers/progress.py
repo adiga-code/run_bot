@@ -9,17 +9,12 @@ from keyboards.builders import kb_main_menu, kb_progress_menu
 from services.session_log_service import SessionLogService
 from services.user_service import UserService
 from services.workout_service import WorkoutService
+from texts import T
 
 router = Router()
 
 LEVEL_NAMES = {1: "Start", 2: "Return", 3: "Base", 4: "Stability", 5: "Performance"}
-
-DAY_TYPE_LABELS = {
-    "run": "🏃 Бег",
-    "strength": "💪 Силовая",
-    "recovery": "🔄 Восстановление",
-    "rest": "😴 Отдых",
-}
+DAY_TYPE_LABELS = T.progress.day_type_labels
 
 
 async def _send_progress(target, user_id: int, session: AsyncSession) -> None:
@@ -29,7 +24,7 @@ async def _send_progress(target, user_id: int, session: AsyncSession) -> None:
 
     user = await user_svc.get(user_id)
     if not user or not user.onboarding_complete:
-        text = "Сначала нужно пройти онбординг. Напиши /start"
+        text = T.progress.not_onboarded
         if isinstance(target, CallbackQuery):
             await target.answer(text, show_alert=True)
         else:
@@ -37,7 +32,7 @@ async def _send_progress(target, user_id: int, session: AsyncSession) -> None:
         return
 
     if user.status != "active":
-        text = "⏳ Ожидаем подтверждения тренера. Как только уровень будет подтверждён — программа начнётся!"
+        text = T.progress.pending_trainer
         if isinstance(target, CallbackQuery):
             await target.answer(text, show_alert=True)
         else:
@@ -60,9 +55,9 @@ async def _send_progress(target, user_id: int, session: AsyncSession) -> None:
     days_into_week = template_day - week_start + 1
     at_risk = week_rate < 0.75 and days_into_week >= 4
 
-    week_line = f"📆 Неделя {week_num} из 4: <b>{week_pct}% выполнено</b>"
+    week_line = T.progress.week_line.format(week_num=week_num, week_pct=week_pct)
     if at_risk:
-        week_line += " ⚠️ <i>(меньше 75% — неделя может повториться)</i>"
+        week_line += T.progress.week_at_risk
 
     # Week ahead: show calendar days, look up workout type by template day
     ahead_lines = []
@@ -74,19 +69,19 @@ async def _send_progress(target, user_id: int, session: AsyncSession) -> None:
         day_type = await wk_svc.get_day_type(user.level, min(future_tmpl, 28)) or "run"
         label = DAY_TYPE_LABELS.get(day_type, day_type)
         marker = "👉" if i == 0 else "•"
-        ahead_lines.append(f"{marker} День {future_cal} — {label}")
+        ahead_lines.append(T.progress.ahead_day_fmt.format(marker=marker, cal_day=future_cal, label=label))
 
     week_ahead = "\n".join(ahead_lines) if ahead_lines else ""
+    completion_status = T.progress.program_complete if calendar_day >= 28 else T.progress.keep_going
 
-    text = (
-        f"📊 <b>Твой прогресс</b>\n\n"
-        f"🏃 Уровень: <b>{level_name}</b>\n"
-        f"📅 День программы: <b>{calendar_day} из 28</b>\n"
-        f"{week_line}\n"
-        f"✅ Тренировок выполнено: <b>{completed}</b>\n"
-        f"🔥 Серия активности: <b>{streak} дн.</b>\n\n"
-        f"<b>Ближайшие дни:</b>\n{week_ahead}\n\n"
-        f"{'🎉 Программа завершена!' if calendar_day >= 28 else 'Продолжай в том же духе!'}"
+    text = T.progress.progress_text.format(
+        level_name=level_name,
+        calendar_day=calendar_day,
+        week_line=week_line,
+        completed=completed,
+        streak=streak,
+        week_ahead=week_ahead,
+        completion_status=completion_status,
     )
 
     if isinstance(target, CallbackQuery):
@@ -114,7 +109,7 @@ async def cb_reset_day(callback: CallbackQuery, state: FSMContext, session: Asyn
     log = await log_svc.get_today(callback.from_user.id)
 
     if not log:
-        await safe_answer(callback, text="Сегодняшний день ещё не начат.", show_alert=True)
+        await safe_answer(callback, text=T.progress.day_not_started, show_alert=True)
         return
 
     await log_svc.update(
@@ -123,7 +118,6 @@ async def cb_reset_day(callback: CallbackQuery, state: FSMContext, session: Asyn
         wellbeing=None,
         sleep_quality=None,
         pain_level=None,
-        pain_increases=None,
         stress_level=None,
         assigned_workout_id=None,
         assigned_version=None,
@@ -137,8 +131,4 @@ async def cb_reset_day(callback: CallbackQuery, state: FSMContext, session: Asyn
     await state.clear()
     await callback.message.edit_reply_markup()
     await safe_answer(callback)
-    await callback.message.answer(
-        "🔄 День сброшен. Можешь начать чек-ин заново!\n\n"
-        "Нажми «Сегодняшняя тренировка» 👇",
-        reply_markup=kb_main_menu(),
-    )
+    await callback.message.answer(T.progress.reset_done, reply_markup=kb_main_menu())

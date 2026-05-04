@@ -59,10 +59,10 @@ def validate_row(row: dict, row_num: int) -> dict:
     # day
     try:
         day = int(row["day"])
-        if not 1 <= day <= 35:
+        if not 1 <= day <= 42:
             raise ValueError
     except (ValueError, KeyError):
-        raise ValidationError(f"  строка {row_num}: поле 'day' должно быть от 1 до 35, получено: '{row.get('day')}'")
+        raise ValidationError(f"  строка {row_num}: поле 'day' должно быть от 1 до 42, получено: '{row.get('day')}'")
 
     # day_type
     day_type = row["day_type"].strip().lower()
