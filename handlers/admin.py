@@ -506,6 +506,7 @@ async def cb_checkin_approve(callback: CallbackQuery, session: AsyncSession) -> 
                 callback.bot, user_id, log.day_index,
                 workout, day_type, version, user.strength_format, user.level,
                 calendar_day=user_svc.log_calendar_day(user, log),
+                max_day=user_svc._max_day(user),
             )
         version_label = T.admin.version_labels.get(version, version)
 
@@ -647,7 +648,7 @@ async def cb_admin_mode_set(callback: CallbackQuery, session: AsyncSession) -> N
             from texts import T as _T2
             await callback.bot.send_message(
                 chat_id=user_id,
-                text=_T2.checkin.workout_header.format(calendar_day=calendar_day, title=workout.title) + tips_block + f"\n\n{workout_text}",
+                text=_T2.checkin.workout_header.format(calendar_day=calendar_day, max_day=user_svc._max_day(user), title=workout.title) + tips_block + f"\n\n{workout_text}",
                 parse_mode="HTML",
                 reply_markup=kb_completion_strength() if is_strength else kb_completion(),
             )

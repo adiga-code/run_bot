@@ -39,10 +39,11 @@ async def _send_progress(target, user_id: int, session: AsyncSession) -> None:
             await target.answer(text)
         return
 
-    # calendar_day — what user sees ("День X из 28"), never goes back
+    # calendar_day — what user sees ("День X из N"), never goes back
     # template_day — which workout week template to use (can repeat)
     calendar_day = await user_svc.current_calendar_day(user) or 1
     template_day = await user_svc.current_template_day(user) or 1
+    max_day = user_svc._max_day(user)
     completed = await log_svc.completed_count(user_id)
     streak = await log_svc.streak(user_id)
     level_name = LEVEL_NAMES.get(user.level, "—")
@@ -64,19 +65,20 @@ async def _send_progress(target, user_id: int, session: AsyncSession) -> None:
     for i in range(7):
         future_cal = calendar_day + i
         future_tmpl = template_day + i
-        if future_cal > 28:
+        if future_cal > max_day:
             break
-        day_type = await wk_svc.get_day_type(user.level, min(future_tmpl, 28)) or "run"
+        day_type = await wk_svc.get_day_type(user.level, min(future_tmpl, max_day)) or "run"
         label = DAY_TYPE_LABELS.get(day_type, day_type)
         marker = "👉" if i == 0 else "•"
         ahead_lines.append(T.progress.ahead_day_fmt.format(marker=marker, cal_day=future_cal, label=label))
 
     week_ahead = "\n".join(ahead_lines) if ahead_lines else ""
-    completion_status = T.progress.program_complete if calendar_day >= 28 else T.progress.keep_going
+    completion_status = T.progress.program_complete if calendar_day >= max_day else T.progress.keep_going
 
     text = T.progress.progress_text.format(
         level_name=level_name,
         calendar_day=calendar_day,
+        max_day=max_day,
         week_line=week_line,
         completed=completed,
         streak=streak,

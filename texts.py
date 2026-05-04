@@ -432,11 +432,11 @@ class T:
         recheck_label        = " (повторный)"
 
         # Шаблон заголовка тренировки (используй .format(...))
-        workout_header       = "📋 <b>День {calendar_day} из 28 — {title}</b>"
+        workout_header       = "📋 <b>День {calendar_day} из {max_day} — {title}</b>"
 
         # Карточка для тренера (используй .format(...))
         admin_card = (
-            "👤 <b>{name}</b> — День {calendar_day} из 28 ({day_type})\n"
+            "👤 <b>{name}</b> — День {calendar_day} из {max_day} ({day_type})\n"
             "Самочувствие: {wellbeing} | Сон: {sleep} | Боль: {pain} | Стресс: {stress}\n\n"
             "🤖 Рекомендация: <b>{version}</b>\n"
             "📝 {reason}"
@@ -517,7 +517,7 @@ class T:
         progress_text = (
             "📊 <b>Твой прогресс</b>\n\n"
             "🏃 Уровень: <b>{level_name}</b>\n"
-            "📅 День программы: <b>{calendar_day} из 28</b>\n"
+            "📅 День программы: <b>{calendar_day} из {max_day}</b>\n"
             "{week_line}\n"
             "✅ Тренировок выполнено: <b>{completed}</b>\n"
             "🔥 Серия активности: <b>{streak} дн.</b>\n\n"
