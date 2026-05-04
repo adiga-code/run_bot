@@ -239,6 +239,7 @@ class T:
         adm_ci_light    = "🔆 Light"
         adm_ci_recovery = "🔄 Recovery"
         adm_ci_rest     = "😴 Отдых"
+        adm_ci_preview  = "👁 Посмотреть тренировку"
 
         # Администратор — режимы дня
         adm_mode_base     = "💪 Base (полная)"

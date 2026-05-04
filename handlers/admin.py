@@ -514,6 +514,66 @@ async def cb_checkin_approve(callback: CallbackQuery, session: AsyncSession) -> 
     await callback.message.answer(T.admin.sent_ok.format(version_label=version_label, name=user.full_name))
 
 
+@router.callback_query(F.data.startswith("adm:preview:"))
+async def cb_workout_preview(callback: CallbackQuery, session: AsyncSession) -> None:
+    """Show the admin a preview of the recommended workout without sending it to the user."""
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+
+    user_id = int(callback.data.split(":")[2])
+    await safe_answer(callback)
+
+    from datetime import date as date_cls
+    from sqlalchemy import select
+    from database.models import SessionLog
+    from services.session_log_service import SessionLogService
+    from services.workout_service import WorkoutService
+    from handlers.utils import filter_strength_text
+
+    result = await session.execute(
+        select(SessionLog).where(
+            SessionLog.user_id == user_id,
+            SessionLog.date == date_cls.today(),
+        )
+    )
+    log = result.scalar_one_or_none()
+    if not log:
+        await callback.message.answer(T.admin.log_not_found)
+        return
+
+    wk_svc = WorkoutService(session)
+    user_svc = UserService(session)
+    user = await user_svc.get_or_raise(user_id)
+
+    version = log.assigned_version or "base"
+    day_type = await wk_svc.get_day_type(user.level, log.day_index) or "run"
+    workout = await wk_svc.get(
+        user.level, log.day_index, version,
+        strength_format=user.strength_format if day_type == "strength" else None,
+    )
+
+    version_label = T.admin.version_labels.get(version, version)
+    if not workout:
+        await callback.message.answer(f"Тренировка не найдена (уровень {user.level}, день {log.day_index}, версия {version}).")
+        return
+
+    workout_text = filter_strength_text(
+        workout.text,
+        user.strength_format if day_type == "strength" else None,
+    )
+    calendar_day = user_svc.log_calendar_day(user, log)
+    preview_header = (
+        f"👁 <b>Предпросмотр — {user.full_name}</b>\n"
+        f"День {calendar_day} | {version_label}\n"
+        f"<b>{workout.title}</b>\n\n"
+    )
+    await callback.message.answer(
+        preview_header + workout_text,
+        parse_mode="HTML",
+    )
+
+
 @router.callback_query(F.data.startswith("adm:mode:set:"))
 async def cb_admin_mode_set(callback: CallbackQuery, session: AsyncSession) -> None:
     if not is_admin(callback.from_user.id):

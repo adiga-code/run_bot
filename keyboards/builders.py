@@ -446,7 +446,8 @@ def kb_checkin_approve(user_id: int) -> InlineKeyboardMarkup:
     builder.button(text=T.btn.adm_ci_light,    callback_data=f"adm:ca:{user_id}:light")
     builder.button(text=T.btn.adm_ci_recovery, callback_data=f"adm:ca:{user_id}:recovery")
     builder.button(text=T.btn.adm_ci_rest,     callback_data=f"adm:ca:{user_id}:rest")
-    builder.adjust(2)
+    builder.button(text=T.btn.adm_ci_preview,  callback_data=f"adm:preview:{user_id}")
+    builder.adjust(2, 2, 1)
     return builder.as_markup()
 
 
