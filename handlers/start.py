@@ -1,5 +1,5 @@
 from aiogram import F, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -13,6 +13,8 @@ from services.user_service import UserService
 from services.whitelist_service import WhitelistService
 from texts import T
 
+_REF_PREFIX = "ref_"
+
 router = Router()
 
 
@@ -21,13 +23,31 @@ class ApplicationStates(StatesGroup):
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext, session: AsyncSession) -> None:
+async def cmd_start(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    command: CommandObject,
+) -> None:
     user_id = message.from_user.id
+
+    # Extract referral code from deep link param (e.g. /start ref_summer24)
+    ref_code: str | None = None
+    if command.args and command.args.startswith(_REF_PREFIX):
+        ref_code = command.args[len(_REF_PREFIX):]
 
     wl_svc = WhitelistService(session)
     is_admin = user_id in settings.admin_ids
 
     if not is_admin and not await wl_svc.is_allowed(user_id):
+        # Still create user record so we can save referral code
+        user_svc = UserService(session)
+        user, _ = await user_svc.get_or_create(
+            telegram_id=user_id,
+            full_name=message.from_user.full_name or "Участник",
+        )
+        if ref_code and not user.referral_code:
+            await user_svc.update(user, referral_code=ref_code)
         await state.clear()
         await message.answer(T.start.not_allowed, reply_markup=kb_apply())
         return
@@ -37,6 +57,9 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession) 
         telegram_id=user_id,
         full_name=message.from_user.full_name or "Участник",
     )
+
+    if ref_code and not user.referral_code:
+        await user_svc.update(user, referral_code=ref_code)
 
     if created or not user.onboarding_complete:
         await state.set_state(OnboardingStates.last_name)
