@@ -215,8 +215,13 @@ class T:
         adm_users     = "👥 Все пользователи"
         adm_reports   = "📋 Отчёты"
         adm_stats     = "📊 Статистика"
-        adm_whitelist = "🔒 Whitelist"
-        adm_broadcast = "📢 Отправить чек-ин всем"
+        adm_whitelist  = "🔒 Whitelist"
+        adm_broadcast  = "📢 Отправить чек-ин всем"
+        adm_referrals  = "🔗 Реферальные ссылки"
+        adm_ref_new    = "➕ Создать ссылку"
+        adm_ref_toggle_on  = "✅ Активна — деактивировать"
+        adm_ref_toggle_off = "❌ Неактивна — активировать"
+        adm_ref_users  = "👥 Кто пришёл"
 
         # Администратор — управление пользователем
         adm_change_mode   = "🔄 Изменить режим дня"
@@ -239,6 +244,7 @@ class T:
         adm_ci_light    = "🔆 Light"
         adm_ci_recovery = "🔄 Recovery"
         adm_ci_rest     = "😴 Отдых"
+        adm_ci_preview  = "👁 Посмотреть тренировку"
 
         # Администратор — режимы дня
         adm_mode_base     = "💪 Base (полная)"
@@ -431,11 +437,11 @@ class T:
         recheck_label        = " (повторный)"
 
         # Шаблон заголовка тренировки (используй .format(...))
-        workout_header       = "📋 <b>День {calendar_day} из 28 — {title}</b>"
+        workout_header       = "📋 <b>День {calendar_day} из {max_day} — {title}</b>"
 
         # Карточка для тренера (используй .format(...))
         admin_card = (
-            "👤 <b>{name}</b> — День {calendar_day} из 28 ({day_type})\n"
+            "👤 <b>{name}</b> — День {calendar_day} из {max_day} ({day_type})\n"
             "Самочувствие: {wellbeing} | Сон: {sleep} | Боль: {pain} | Стресс: {stress}\n\n"
             "🤖 Рекомендация: <b>{version}</b>\n"
             "📝 {reason}"
@@ -516,7 +522,7 @@ class T:
         progress_text = (
             "📊 <b>Твой прогресс</b>\n\n"
             "🏃 Уровень: <b>{level_name}</b>\n"
-            "📅 День программы: <b>{calendar_day} из 28</b>\n"
+            "📅 День программы: <b>{calendar_day} из {max_day}</b>\n"
             "{week_line}\n"
             "✅ Тренировок выполнено: <b>{completed}</b>\n"
             "🔥 Серия активности: <b>{streak} дн.</b>\n\n"
@@ -828,6 +834,27 @@ class T:
             "✅ Уровень пользователя <code>{user_id}</code> изменён на "
             "<b>{level_name} ({level})</b>."
         )
+
+        # Referral links
+        ref_menu_header    = "🔗 <b>Реферальные ссылки</b>\n\nВсего ссылок: <b>{count}</b>\n\n{lines}"
+        ref_menu_empty     = "🔗 <b>Реферальные ссылки</b>\n\nПока нет ни одной ссылки. Нажми «➕ Создать»."
+        # .format(name=..., code=..., total=..., onboarded=..., activated=..., status=...)
+        ref_list_line      = "{status} <b>{name}</b> — {total} / {onboarded} / {activated}"
+        ref_ask_name       = "Введи название ссылки (например: Instagram, ВКонтакте, Рассылка):"
+        ref_created        = "✅ Ссылка <b>{name}</b> создана!\n\n🔗 <code>{link}</code>\n\nСкопируй и отправь куда нужно."
+        ref_detail_header  = (
+            "🔗 <b>{name}</b>\n"
+            "Статус: {status}\n\n"
+            "👥 Перешли: <b>{total}</b>\n"
+            "📋 Прошли анкету: <b>{onboarded}</b>\n"
+            "✅ Активированы: <b>{activated}</b>"
+        )
+        ref_users_header   = "👥 <b>{name}</b> — пользователи:\n\n{lines}"
+        ref_users_empty    = "Никто ещё не пришёл по этой ссылке."
+        ref_user_line      = "{name} | {status} | день {day}"
+        ref_toggled_on     = "✅ Ссылка <b>{name}</b> активирована."
+        ref_toggled_off    = "❌ Ссылка <b>{name}</b> деактивирована."
+        ref_not_found      = "Ссылка не найдена."
 
     # ══════════════════════════════════════════════════════════════════════════
     # ИНТЕРПРЕТАЦИИ ЧЕК-ИНА

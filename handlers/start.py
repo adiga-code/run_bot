@@ -38,6 +38,16 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession) 
         full_name=message.from_user.full_name or "Участник",
     )
 
+    # Store referral code on first visit (deep link: /start <code>)
+    if created and not user.referral_code:
+        payload = message.text.split(maxsplit=1)[1] if " " in (message.text or "") else ""
+        if payload:
+            from services.referral_service import ReferralService
+            ref_svc = ReferralService(session)
+            ref_link = await ref_svc.get_by_code(payload)
+            if ref_link and ref_link.is_active:
+                await user_svc.update(user, referral_code=payload)
+
     if created or not user.onboarding_complete:
         await state.set_state(OnboardingStates.last_name)
         await message.answer(T.start.onboarding_intro, parse_mode="HTML")

@@ -50,8 +50,8 @@ class UserService:
         return user
 
     def _max_day(self, user: User) -> int:
-        """Returns the maximum program day for this user (28 or 42 if week 5/6 is activated)."""
-        return 42 if getattr(user, "extended_week5", False) else 28
+        """Returns the maximum program day for this user (28 or 49 if extended weeks are activated)."""
+        return 49 if getattr(user, "extended_week5", False) else 28
 
     async def current_calendar_day(self, user: User) -> int | None:
         """
@@ -99,7 +99,7 @@ class UserService:
         if not user.program_start_date:
             return log.day_index
         delta = (log.date - user.program_start_date).days
-        return max(1, min(28, delta + 1))
+        return max(1, min(self._max_day(user), delta + 1))
 
     def current_week_range(self, day_index: int) -> tuple[int, int]:
         """Returns (week_start_day, week_end_day) for the given day_index."""

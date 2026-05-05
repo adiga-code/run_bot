@@ -367,7 +367,29 @@ def kb_admin_menu() -> InlineKeyboardMarkup:
     builder.button(text=T.btn.adm_reports,   callback_data="adm:menu:reports")
     builder.button(text=T.btn.adm_stats,     callback_data="adm:menu:stats")
     builder.button(text=T.btn.adm_whitelist, callback_data="adm:menu:whitelist")
+    builder.button(text=T.btn.adm_referrals, callback_data="adm:menu:referrals")
     builder.button(text=T.btn.adm_broadcast, callback_data="adm:broadcast:checkin")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_admin_referrals(links: list) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for link in links:
+        icon = "✅" if link.is_active else "❌"
+        builder.button(text=f"{icon} {link.name}", callback_data=f"adm:ref:view:{link.code}")
+    builder.button(text=T.btn.adm_ref_new, callback_data="adm:ref:new")
+    builder.button(text=T.btn.back, callback_data="adm:menu:back")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_admin_ref_detail(code: str, is_active: bool) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    toggle_text = T.btn.adm_ref_toggle_on if is_active else T.btn.adm_ref_toggle_off
+    builder.button(text=toggle_text,         callback_data=f"adm:ref:toggle:{code}")
+    builder.button(text=T.btn.adm_ref_users, callback_data=f"adm:ref:users:{code}")
+    builder.button(text=T.btn.back,          callback_data="adm:menu:referrals")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -446,7 +468,8 @@ def kb_checkin_approve(user_id: int) -> InlineKeyboardMarkup:
     builder.button(text=T.btn.adm_ci_light,    callback_data=f"adm:ca:{user_id}:light")
     builder.button(text=T.btn.adm_ci_recovery, callback_data=f"adm:ca:{user_id}:recovery")
     builder.button(text=T.btn.adm_ci_rest,     callback_data=f"adm:ca:{user_id}:rest")
-    builder.adjust(2)
+    builder.button(text=T.btn.adm_ci_preview,  callback_data=f"adm:preview:{user_id}")
+    builder.adjust(2, 2, 1)
     return builder.as_markup()
 
 

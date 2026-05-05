@@ -35,6 +35,7 @@ async def send_workout_to_user(
     strength_format: str | None,
     level: int,
     calendar_day: int | None = None,
+    max_day: int = 28,
 ) -> None:
     """Send the final workout message to the user.
 
@@ -53,7 +54,7 @@ async def send_workout_to_user(
     display_day = calendar_day if calendar_day is not None else day_index
     await bot.send_message(
         chat_id=user_id,
-        text=f"📋 <b>День {display_day} из 28 — {workout.title}</b>{tips_block}\n\n{workout_text}",
+        text=f"📋 <b>День {display_day} из {max_day} — {workout.title}</b>{tips_block}\n\n{workout_text}",
         parse_mode="HTML",
         reply_markup=kb_completion_strength() if is_strength else kb_completion(),
     )
