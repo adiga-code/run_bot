@@ -367,7 +367,26 @@ def kb_admin_menu() -> InlineKeyboardMarkup:
     builder.button(text=T.btn.adm_reports,   callback_data="adm:menu:reports")
     builder.button(text=T.btn.adm_stats,     callback_data="adm:menu:stats")
     builder.button(text=T.btn.adm_whitelist, callback_data="adm:menu:whitelist")
+    builder.button(text=T.btn.adm_referrals, callback_data="adm:menu:referrals")
     builder.button(text=T.btn.adm_broadcast, callback_data="adm:broadcast:checkin")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_admin_referral_list(links: list) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for link in links:
+        builder.button(text=f"📎 {link.name}", callback_data=f"adm:ref:view:{link.code}")
+    builder.button(text=T.btn.adm_ref_create, callback_data="adm:ref:create")
+    builder.button(text=T.btn.back,           callback_data="adm:ref:back")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_admin_referral_detail(code: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text=T.btn.adm_ref_delete,    callback_data=f"adm:ref:del:{code}")
+    builder.button(text=T.btn.adm_ref_back_list, callback_data="adm:menu:referrals")
     builder.adjust(1)
     return builder.as_markup()
 
