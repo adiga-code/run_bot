@@ -40,7 +40,6 @@ def get_interpretation(
 
     if version == "light":
         if fatigue_reduction:
-            # накопленная усталость или возврат после боли — оба случая про нагрузку
             return T.interpretations.fatigue_light
         if pain_level == 2:
             return T.interpretations.light_pain
