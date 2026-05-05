@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from handlers.onboarding import OnboardingStates
 from handlers.utils import safe_answer
-from keyboards.builders import kb_apply, kb_admin_application, kb_main_menu
+from keyboards.builders import kb_apply, kb_admin_application, kb_main_menu, kb_welcome
 from services.user_service import UserService
 from services.whitelist_service import WhitelistService
 from texts import T
@@ -36,40 +36,55 @@ async def cmd_start(
     if command.args and command.args.startswith(_REF_PREFIX):
         ref_code = command.args[len(_REF_PREFIX):]
 
-    wl_svc = WhitelistService(session)
-    is_admin = user_id in settings.admin_ids
-
-    if not is_admin and not await wl_svc.is_allowed(user_id):
-        # Still create user record so we can save referral code
-        user_svc = UserService(session)
-        user, _ = await user_svc.get_or_create(
-            telegram_id=user_id,
-            full_name=message.from_user.full_name or "Участник",
-        )
-        if ref_code and not user.referral_code:
-            await user_svc.update(user, referral_code=ref_code)
-        await state.clear()
-        await message.answer(T.start.not_allowed, reply_markup=kb_apply())
-        return
-
+    # Always create/find the user so we can save referral code
     user_svc = UserService(session)
     user, created = await user_svc.get_or_create(
         telegram_id=user_id,
         full_name=message.from_user.full_name or "Участник",
     )
-
     if ref_code and not user.referral_code:
         await user_svc.update(user, referral_code=ref_code)
 
-    if created or not user.onboarding_complete:
-        await state.set_state(OnboardingStates.last_name)
-        await message.answer(T.start.onboarding_intro, parse_mode="HTML")
+    # Active/completed users go straight to main menu
+    if user.onboarding_complete and user.status in ("active", "completed"):
+        await state.clear()
+        await message.answer(
+            T.start.welcome_back.format(name=user.full_name.split()[0]),
+            reply_markup=kb_main_menu(),
+        )
         return
 
-    await message.answer(
-        T.start.welcome_back.format(name=user.full_name.split()[0]),
-        reply_markup=kb_main_menu(),
+    # Pending (onboarding done, waiting for trainer) — show waiting message
+    if user.onboarding_complete and user.status == "pending":
+        await state.clear()
+        await message.answer(T.checkin.pending_trainer_cmd)
+        return
+
+    # Everyone else (new users, guests) — welcome screen with Мероприятия / Тренировки
+    await state.clear()
+    await message.answer(T.events.welcome, parse_mode="HTML", reply_markup=kb_welcome())
+
+
+# ── "Тренировки" button from welcome screen ───────────────────────────────────
+
+@router.callback_query(F.data == "ev:trainings")
+async def cb_welcome_trainings(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    await safe_answer(callback)
+    user_id = callback.from_user.id
+    is_admin_user = user_id in settings.admin_ids
+
+    wl_svc = WhitelistService(session)
+    if not is_admin_user and not await wl_svc.is_allowed(user_id):
+        await callback.message.answer(T.start.not_allowed, reply_markup=kb_apply())
+        return
+
+    user_svc = UserService(session)
+    user, _ = await user_svc.get_or_create(
+        telegram_id=user_id,
+        full_name=callback.from_user.full_name or "Участник",
     )
+    await state.set_state(OnboardingStates.last_name)
+    await callback.message.answer(T.start.onboarding_intro, parse_mode="HTML")
 
 
 # ── Application flow ───────────────────────────────────────────────────────────
