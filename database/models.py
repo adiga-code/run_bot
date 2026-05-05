@@ -154,6 +154,36 @@ class ReferralLink(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class Event(Base):
+    __tablename__ = "events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    date_label: Mapped[str] = mapped_column(String(100), nullable=False)       # e.g. "17 мая"
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    channel_link: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    registrations: Mapped[list["EventRegistration"]] = relationship(back_populates="event")
+
+
+class EventRegistration(Base):
+    __tablename__ = "event_registrations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("events.id"), nullable=False)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    tg_username: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    phone: Mapped[str] = mapped_column(String(50), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    event: Mapped["Event"] = relationship(back_populates="registrations")
+
+
 class WhitelistEntry(Base):
     __tablename__ = "whitelist"
 

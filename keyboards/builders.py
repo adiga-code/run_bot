@@ -360,6 +360,63 @@ def kb_admin_application(user_id: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+# ── Events (user) ─────────────────────────────────────────────────────────────
+
+def kb_welcome() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text=T.events.btn_events,    callback_data="ev:list")
+    builder.button(text=T.events.btn_trainings, callback_data="ev:trainings")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def kb_events_list(events: list) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for ev in events:
+        builder.button(text=f"📎 {ev.title} — {ev.date_label}", callback_data=f"ev:view:{ev.id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_event_detail(event_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text=T.events.btn_register,    callback_data=f"ev:reg:{event_id}")
+    builder.button(text=T.events.btn_back_events, callback_data="ev:list")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_skip_email() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text=T.btn.skip, callback_data="ev:skip_email")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+# ── Events (admin) ─────────────────────────────────────────────────────────────
+
+def kb_admin_events_list(events: list) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for ev in events:
+        icon = "✅" if ev.is_active else "⏸"
+        builder.button(text=f"{icon} {ev.title}", callback_data=f"adm:ev:view:{ev.id}")
+    builder.button(text=T.events.adm_btn_create, callback_data="adm:ev:create")
+    builder.button(text=T.btn.back,              callback_data="adm:ev:back")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_admin_event_detail(event_id: int, is_active: bool) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    toggle_text = T.events.adm_btn_toggle_on if is_active else T.events.adm_btn_toggle_off
+    builder.button(text=toggle_text,               callback_data=f"adm:ev:toggle:{event_id}")
+    builder.button(text=T.events.adm_btn_regs,     callback_data=f"adm:ev:regs:{event_id}")
+    builder.button(text=T.events.adm_btn_delete,   callback_data=f"adm:ev:del:{event_id}")
+    builder.button(text=T.events.adm_btn_back,     callback_data="adm:menu:events")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def kb_admin_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=T.btn.adm_pending,   callback_data="adm:menu:pending")
@@ -368,6 +425,7 @@ def kb_admin_menu() -> InlineKeyboardMarkup:
     builder.button(text=T.btn.adm_stats,     callback_data="adm:menu:stats")
     builder.button(text=T.btn.adm_whitelist, callback_data="adm:menu:whitelist")
     builder.button(text=T.btn.adm_referrals, callback_data="adm:menu:referrals")
+    builder.button(text=T.btn.adm_events,    callback_data="adm:menu:events")
     builder.button(text=T.btn.adm_broadcast, callback_data="adm:broadcast:checkin")
     builder.adjust(1)
     return builder.as_markup()
@@ -574,6 +632,7 @@ def kb_main_menu(checkin_done: bool = False) -> InlineKeyboardMarkup:
     builder.button(text=T.btn.menu_today,     callback_data="menu:today")
     builder.button(text=T.btn.menu_progress,  callback_data="menu:progress")
     builder.button(text=T.btn.menu_reminders, callback_data="menu:reminders")
+    builder.button(text=T.events.btn_events,  callback_data="ev:list")
     builder.adjust(1)
     return builder.as_markup()
 
