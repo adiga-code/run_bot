@@ -416,11 +416,12 @@ def kb_admin_report_actions(user_id: int) -> InlineKeyboardMarkup:
 
 def kb_admin_manage(user_id: int, extended: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=T.btn.adm_change_mode,  callback_data=f"adm:mode:{user_id}")
-    builder.button(text=T.btn.adm_jump_day,     callback_data=f"adm:jump:{user_id}")
-    builder.button(text=T.btn.adm_change_level, callback_data=f"adm:pick:{user_id}")
-    builder.button(text=T.btn.adm_mark_workout, callback_data=f"adm:markday:{user_id}")
-    builder.button(text=T.btn.adm_send_msg,     callback_data=f"adm:msg:{user_id}")
+    builder.button(text=T.btn.adm_change_mode,   callback_data=f"adm:mode:{user_id}")
+    builder.button(text=T.btn.adm_jump_day,      callback_data=f"adm:jump:{user_id}")
+    builder.button(text=T.btn.adm_change_level,  callback_data=f"adm:pick:{user_id}")
+    builder.button(text=T.btn.adm_mark_workout,  callback_data=f"adm:markday:{user_id}")
+    builder.button(text=T.btn.adm_send_msg,      callback_data=f"adm:msg:{user_id}")
+    builder.button(text=T.btn.adm_send_checkin,  callback_data=f"adm:send_checkin:{user_id}")
     if not extended:
         builder.button(text=T.btn.adm_extend_week5, callback_data=f"adm:extend:{user_id}")
     else:

@@ -229,6 +229,7 @@ class T:
         adm_change_level  = "🎯 Изменить уровень"
         adm_mark_workout  = "📝 Отметить тренировку"
         adm_send_msg      = "✉️ Отправить сообщение"
+        adm_send_checkin  = "📨 Отправить чек-ин"
         adm_extend_week5  = "➕ Продлить на 5-ю неделю"
         adm_week5_active  = "✅ 5-я неделя активна"
         adm_download_csv  = "📥 Скачать CSV"

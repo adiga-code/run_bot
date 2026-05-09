@@ -758,6 +758,52 @@ async def admin_send_msg_input(message: Message, state: FSMContext) -> None:
         await message.answer(T.admin.message_failed.format(error=e))
 
 
+@router.callback_query(F.data.startswith("adm:send_checkin:"))
+async def cb_admin_send_checkin(callback: CallbackQuery, session: AsyncSession) -> None:
+    """Send morning check-in reminder to a specific user right now."""
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+
+    user_id = int(callback.data.split(":")[2])
+    await safe_answer(callback)
+
+    from datetime import date as date_cls
+    from database.models import SessionLog
+    from sqlalchemy import select as sa_select
+    from services.session_log_service import SessionLogService
+
+    user_svc = UserService(session)
+    user = await user_svc.get(user_id)
+    if not user or user.status != "active":
+        await callback.message.answer("Пользователь не активен.")
+        return
+
+    log_svc = SessionLogService(session)
+
+    # Ensure today's log exists
+    template_day = await user_svc.current_program_day(user)
+    if template_day is None:
+        await callback.message.answer("Программа пользователя ещё не начата.")
+        return
+    log, _ = await log_svc.get_or_create_today(user_id, template_day)
+
+    if log.checkin_done:
+        await callback.message.answer(f"✅ {user.full_name} уже прошёл(а) чек-ин сегодня.")
+        return
+
+    try:
+        await callback.bot.send_message(
+            chat_id=user_id,
+            text=T.scheduler.morning_reminder,
+            reply_markup=kb_main_menu(),
+        )
+        await log_svc.update(log, morning_sent=True)
+        await callback.message.answer(f"📨 Чек-ин отправлен: {user.full_name}")
+    except Exception as e:
+        await callback.message.answer(f"Ошибка отправки: {e}")
+
+
 @router.callback_query(F.data == "adm:menu:whitelist")
 async def cb_admin_whitelist(callback: CallbackQuery, session: AsyncSession) -> None:
     if not is_admin(callback.from_user.id):
