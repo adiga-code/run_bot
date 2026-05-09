@@ -5,7 +5,7 @@ from data.timezones import TIMEZONES
 from texts import T
 
 
-# ── Onboarding ────────────────────────────────────────────────────────────────
+# ── Onboarding ─────────────────────────────────────────────────────────────────────────────
 
 def kb_skip(callback_data: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -262,7 +262,7 @@ def kb_timezone() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Check-in ──────────────────────────────────────────────────────────────────
+# ── Check-in ─────────────────────────────────────────────────────────────────────────────
 
 def kb_wellbeing() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -327,7 +327,7 @@ def kb_pain_increases_checkin() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Workout completion ────────────────────────────────────────────────────────
+# ── Workout completion ─────────────────────────────────────────────────────────────────────────
 
 def kb_completion() -> InlineKeyboardMarkup:
     """Кнопки завершения тренировки (СТАРАЯ система: done/partial/skipped)."""
@@ -382,7 +382,7 @@ def kb_had_pain() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Admin approval ────────────────────────────────────────────────────────────
+# ── Admin approval ─────────────────────────────────────────────────────────────────────────
 
 def kb_apply() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -399,7 +399,7 @@ def kb_admin_application(user_id: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Events (user) ─────────────────────────────────────────────────────────────
+# ── Events (user) ───────────────────────────────────────────────────────────────────────────
 
 def kb_welcome() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -432,7 +432,7 @@ def kb_skip_email() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Events (admin) ─────────────────────────────────────────────────────────────
+# ── Events (admin) ────────────────────────────────────────────────────────────────────────────
 
 def kb_admin_events_list(events: list) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -529,17 +529,25 @@ def kb_admin_manage(
     has_red_flag: bool = False,
     current_period: str | None = None,
 ) -> InlineKeyboardMarkup:
+    """Кнопки управления пользователем.
+    Для новой логики (current_period != None) убираем кнопки,
+    специфичные для 28-дневной программы.
+    """
+    is_new = current_period is not None
     builder = InlineKeyboardBuilder()
-    builder.button(text=T.btn.adm_change_mode,   callback_data=f"adm:mode:{user_id}")
-    builder.button(text=T.btn.adm_jump_day,      callback_data=f"adm:jump:{user_id}")
-    builder.button(text=T.btn.adm_change_level,  callback_data=f"adm:pick:{user_id}")
-    builder.button(text=T.btn.adm_mark_workout,  callback_data=f"adm:markday:{user_id}")
-    builder.button(text=T.btn.adm_send_msg,      callback_data=f"adm:msg:{user_id}")
-    builder.button(text=T.btn.adm_send_checkin,  callback_data=f"adm:send_checkin:{user_id}")
-    if not extended:
-        builder.button(text=T.btn.adm_extend_week5, callback_data=f"adm:extend:{user_id}")
-    else:
-        builder.button(text=T.btn.adm_week5_active, callback_data=f"adm:extend:off:{user_id}")
+    builder.button(text=T.btn.adm_change_mode,  callback_data=f"adm:mode:{user_id}")
+    if not is_new:
+        builder.button(text=T.btn.adm_jump_day, callback_data=f"adm:jump:{user_id}")
+    builder.button(text=T.btn.adm_change_level, callback_data=f"adm:pick:{user_id}")
+    if not is_new:
+        builder.button(text=T.btn.adm_mark_workout, callback_data=f"adm:markday:{user_id}")
+    builder.button(text=T.btn.adm_send_msg,     callback_data=f"adm:msg:{user_id}")
+    builder.button(text=T.btn.adm_send_checkin, callback_data=f"adm:send_checkin:{user_id}")
+    if not is_new:
+        if not extended:
+            builder.button(text=T.btn.adm_extend_week5, callback_data=f"adm:extend:{user_id}")
+        else:
+            builder.button(text=T.btn.adm_week5_active, callback_data=f"adm:extend:off:{user_id}")
     if has_red_flag:
         builder.button(text="🚩 Снять red flag", callback_data=f"adm:red_flag:remove:{user_id}")
     builder.button(text="🗑 Удалить пользователя", callback_data=f"adm:delete:{user_id}")
@@ -648,7 +656,7 @@ def kb_admin_level_picker(user_id: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Evening reminder mark button ──────────────────────────────────────────────
+# ── Evening reminder mark button ────────────────────────────────────────────────────────────────────
 
 def kb_mark_workout() -> InlineKeyboardMarkup:
     """Single button for evening reminder — triggers the completion FSM."""
@@ -658,7 +666,7 @@ def kb_mark_workout() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Strength day options ──────────────────────────────────────────────────────
+# ── Strength day options ────────────────────────────────────────────────────────────────────────
 
 def kb_strength_day_options() -> InlineKeyboardMarkup:
     """Shown after strength workout is displayed: mark it or do a custom workout."""
@@ -671,7 +679,7 @@ def kb_strength_day_options() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Absence flow ──────────────────────────────────────────────────────────────
+# ── Absence flow ────────────────────────────────────────────────────────────────────────────
 
 def kb_absence_reason() -> InlineKeyboardMarkup:
     """Sent when user hasn't checked in for 3 days — ask why."""
@@ -695,7 +703,7 @@ def kb_return_training() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Progress / Main menu ──────────────────────────────────────────────────────
+# ── Progress / Main menu ─────────────────────────────────────────────────────────────────────────
 
 def kb_main_menu(checkin_done: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
