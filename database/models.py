@@ -67,7 +67,7 @@ class User(Base):
     extended_week5: Mapped[bool] = mapped_column(Boolean, default=False)  # trainer can add 5th week
 
     # Referral tracking
-    referral_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    referral_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Access & lifecycle
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -75,7 +75,6 @@ class User(Base):
     # pending = ждёт подтверждения тренера; active = программа запущена
     status: Mapped[str] = mapped_column(String(20), default="pending", server_default="active")
     role: Mapped[str] = mapped_column(String(20), default="athlete")  # athlete / admin (reserved)
-    referral_code: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     session_logs: Mapped[list["SessionLog"]] = relationship(back_populates="user")
@@ -147,16 +146,6 @@ class SessionLog(Base):
     workout: Mapped["Workout | None"] = relationship()
 
 
-class ReferralLink(Base):
-    __tablename__ = "referral_links"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    name: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_by: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-
-
 class Event(Base):
     __tablename__ = "events"
 
@@ -200,7 +189,7 @@ class ReferralLink(Base):
     __tablename__ = "referral_links"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(String(50), unique=True)
+    code: Mapped[str] = mapped_column(String(100), unique=True)
     name: Mapped[str] = mapped_column(String(200))
     created_by: Mapped[int] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
