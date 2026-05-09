@@ -215,13 +215,19 @@ class T:
         adm_users     = "👥 Все пользователи"
         adm_reports   = "📋 Отчёты"
         adm_stats     = "📊 Статистика"
-        adm_whitelist  = "🔒 Whitelist"
-        adm_broadcast  = "📢 Отправить чек-ин всем"
-        adm_referrals  = "🔗 Реферальные ссылки"
-        adm_ref_new    = "➕ Создать ссылку"
+        adm_whitelist      = "🔒 Whitelist"
+        adm_broadcast      = "📢 Отправить чек-ин всем"
+        adm_referrals      = "🔗 Реферальные ссылки"
+        adm_events         = "🗓 Мероприятия"
+
+        # Реферальные ссылки
+        adm_ref_new        = "➕ Создать ссылку"
+        adm_ref_create     = "➕ Создать ссылку"
         adm_ref_toggle_on  = "✅ Активна — деактивировать"
         adm_ref_toggle_off = "❌ Неактивна — активировать"
-        adm_ref_users  = "👥 Кто пришёл"
+        adm_ref_users      = "👥 Кто пришёл"
+        adm_ref_delete     = "🗑 Удалить"
+        adm_ref_back_list  = "◀️ К списку ссылок"
 
         # Администратор — управление пользователем
         adm_change_mode   = "🔄 Изменить режим дня"
@@ -856,6 +862,133 @@ class T:
         ref_toggled_on     = "✅ Ссылка <b>{name}</b> активирована."
         ref_toggled_off    = "❌ Ссылка <b>{name}</b> деактивирована."
         ref_not_found      = "Ссылка не найдена."
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # МЕРОПРИЯТИЯ
+    # ══════════════════════════════════════════════════════════════════════════
+    class events:
+        # Приветственный экран /start
+        welcome = (
+            "👋 Привет! Добро пожаловать в беговое комьюнити <b>Культура Движения</b>.\n\n"
+            "Хочешь зарегистрироваться на одно из наших мероприятий или сразу начать "
+            "тренировочную программу?"
+        )
+        btn_events    = "🗓 Мероприятия"
+        btn_trainings = "🏃 Тренировки"
+
+        # Список мероприятий
+        events_header = "📅 <b>Ближайшие мероприятия:</b>"
+        no_events     = "Сейчас нет активных мероприятий. Загляни позже!"
+
+        # .format(title=..., date_label=..., description=...)
+        event_detail = (
+            "<b>{title}</b> — {date_label}\n\n"
+            "{description}"
+        )
+        btn_register      = "✅ Зарегистрироваться"
+        btn_back_events   = "◀️ К мероприятиям"
+        already_registered = "Ты уже зарегистрирован(а) на это мероприятие!"
+
+        # Сбор данных
+        ask_name  = "Напиши своё <b>имя и фамилию</b>:"
+        err_name  = "Пожалуйста, введи настоящее имя."
+        ask_phone = "Введи свой <b>номер телефона</b>:"
+        err_phone = "Похоже, номер введён неверно. Попробуй ещё раз:"
+        ask_email = "Введи свой <b>email</b> (или нажми «Пропустить»):"
+
+        # .format(title=..., date_label=..., channel_link=...)
+        registered_ok = (
+            "🎉 <b>Готово! Ты записан(а) на мероприятие.</b>\n\n"
+            "Чтобы узнать расписание, познакомиться с другими участниками и быть в курсе "
+            "происходящего — заходи в канал события:\n{channel_link}"
+        )
+        registered_no_link = (
+            "🎉 <b>Готово! Ты записан(а) на мероприятие.</b>\n\n"
+            "Мы сохранили твои данные. Тренер свяжется с тобой."
+        )
+
+        # Уведомление админу
+        # .format(event_title=..., full_name=..., phone=..., email=..., tg_link=..., telegram_id=...)
+        admin_new_reg = (
+            "📝 <b>Новая регистрация на мероприятие!</b>\n\n"
+            "Мероприятие: <b>{event_title}</b>\n"
+            "Имя: <b>{full_name}</b>\n"
+            "Телефон: <code>{phone}</code>\n"
+            "Email: {email}\n"
+            "Telegram: {tg_link}\n"
+            "ID: <code>{telegram_id}</code>"
+        )
+
+        # Админ — управление мероприятиями
+        adm_panel_header = "🗓 <b>Мероприятия</b>"
+        adm_empty        = "Мероприятий пока нет. Создай первое!"
+        # .format(title=..., date_label=..., is_active=..., reg_count=...)
+        adm_event_item   = "{active_icon} <b>{title}</b> ({date_label}) — {reg_count} регистраций"
+        adm_active_icon  = "✅"
+        adm_inactive_icon = "⏸"
+        # .format(title=..., date_label=..., description=..., channel_link=..., reg_count=..., is_active=...)
+        adm_event_detail = (
+            "{active_icon} <b>{title}</b>\n"
+            "Дата: {date_label}\n"
+            "Ссылка на канал: {channel_link}\n"
+            "Регистраций: <b>{reg_count}</b>\n\n"
+            "{description}"
+        )
+        adm_btn_create       = "➕ Создать мероприятие"
+        adm_btn_toggle_on    = "⏸ Скрыть от пользователей"
+        adm_btn_toggle_off   = "✅ Показать пользователям"
+        adm_btn_regs         = "👥 Список регистраций"
+        adm_btn_delete       = "🗑 Удалить мероприятие"
+        adm_btn_back         = "◀️ К мероприятиям"
+        adm_no_regs          = "Регистраций пока нет."
+        # .format(n=..., title=...)
+        adm_regs_header      = "👥 <b>Регистрации на «{title}»</b> ({n}):\n"
+        # .format(i=..., full_name=..., phone=..., email=..., tg_link=...)
+        adm_reg_line         = "{i}. <b>{full_name}</b> | {phone} | {email} | {tg_link}"
+
+        # FSM создания
+        ask_title       = "Введи <b>название</b> мероприятия:"
+        ask_date_label  = "Введи <b>дату</b> (например: <i>17 мая</i> или <i>17.05.2025</i>):"
+        ask_description = "Введи <b>описание</b> мероприятия (текст, который увидит пользователь):"
+        ask_channel     = "Введи <b>ссылку на Telegram-канал</b> события (или нажми «Пропустить»):"
+        # .format(title=..., date_label=...)
+        adm_created     = "✅ Мероприятие <b>«{title}»</b> ({date_label}) создано."
+        # .format(title=...)
+        adm_deleted     = "✅ Мероприятие <b>«{title}»</b> удалено."
+        adm_toggled_on  = "✅ Мероприятие теперь видно пользователям."
+        adm_toggled_off = "⏸ Мероприятие скрыто от пользователей."
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # РЕФЕРАЛЬНЫЕ ССЫЛКИ
+    # ══════════════════════════════════════════════════════════════════════════
+    class referral:
+        panel_header  = "🔗 <b>Реферальные ссылки</b>"
+        empty         = "Реферальных ссылок пока нет.\n\nСоздай первую — она позволит отслеживать, откуда приходят участники."
+        # .format(bot_username=..., code=..., name=..., total=..., onboarded=..., activated=...)
+        link_item = (
+            "📎 <b>{name}</b> (<code>{code}</code>)\n"
+            "Ссылка: <code>t.me/{bot_username}?start=ref_{code}</code>\n"
+            "Пришло: <b>{total}</b> | Онбординг: <b>{onboarded}</b> | Активных: <b>{activated}</b>"
+        )
+        ask_code = (
+            "Введи <b>код</b> для ссылки (только латинские буквы, цифры, _).\n\n"
+            "Пример: <code>instagram</code>, <code>vk_june</code>, <code>tg_channel</code>"
+        )
+        err_code_empty   = "Код не может быть пустым."
+        err_code_invalid = "Код может содержать только латинские буквы, цифры и знак _. Попробуй снова:"
+        err_code_exists  = "Ссылка с таким кодом уже существует. Введи другой код:"
+        ask_name         = "Введи <b>название</b> ссылки (например: <i>Instagram июнь</i>):"
+        err_name_empty   = "Название не может быть пустым."
+        # .format(name=..., code=..., bot_username=...)
+        created = (
+            "✅ <b>Ссылка создана!</b>\n\n"
+            "Название: <b>{name}</b>\n"
+            "Ссылка: <code>t.me/{bot_username}?start=ref_{code}</code>"
+        )
+        # .format(name=...)
+        deleted      = "✅ Ссылка <b>{name}</b> удалена."
+        not_found    = "Ссылка не найдена."
+        cancel       = "Отменено."
 
     # ══════════════════════════════════════════════════════════════════════════
     # ИНТЕРПРЕТАЦИИ ЧЕК-ИНА

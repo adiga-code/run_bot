@@ -12,7 +12,6 @@ class ReferralService:
 
     async def create(self, name: str, admin_id: int) -> ReferralLink:
         code = secrets.token_urlsafe(6)
-        # Ensure uniqueness (extremely unlikely collision, but check anyway)
         while await self.get_by_code(code):
             code = secrets.token_urlsafe(6)
         link = ReferralLink(code=code, name=name, created_by=admin_id)
@@ -33,21 +32,37 @@ class ReferralService:
         )
         return list(result.scalars().all())
 
+    # Alias for compatibility with main-branch handlers
+    async def list_all(self) -> list[ReferralLink]:
+        return await self.get_all()
+
     async def toggle_active(self, link: ReferralLink) -> ReferralLink:
         link.is_active = not link.is_active
         await self.session.commit()
         return link
 
     async def get_stats(self, code: str) -> dict:
-        """Return total/onboarded/activated counts for a referral code."""
-        base = select(func.count()).where(User.referral_code == code)
-        total = (await self.session.execute(base)).scalar_one()
-        onboarded = (await self.session.execute(
-            base.where(User.onboarding_complete == True)
-        )).scalar_one()
-        activated = (await self.session.execute(
-            base.where(User.status == "active")
-        )).scalar_one()
+        r = await self.session.execute(
+            select(func.count()).select_from(User).where(User.referral_code == code)
+        )
+        total = r.scalar() or 0
+
+        r = await self.session.execute(
+            select(func.count()).select_from(User).where(
+                User.referral_code == code,
+                User.onboarding_complete == True,
+            )
+        )
+        onboarded = r.scalar() or 0
+
+        r = await self.session.execute(
+            select(func.count()).select_from(User).where(
+                User.referral_code == code,
+                User.status.in_(["active", "completed"]),
+            )
+        )
+        activated = r.scalar() or 0
+
         return {"total": total, "onboarded": onboarded, "activated": activated}
 
     async def get_users(self, code: str) -> list[User]:
@@ -55,3 +70,11 @@ class ReferralService:
             select(User).where(User.referral_code == code).order_by(User.created_at.desc())
         )
         return list(result.scalars().all())
+
+    async def delete(self, code: str) -> bool:
+        link = await self.get_by_code(code)
+        if not link:
+            return False
+        await self.session.delete(link)
+        await self.session.commit()
+        return True
