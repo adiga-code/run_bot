@@ -71,13 +71,15 @@ async def test_streak_no_skips(session):
 
 
 @pytest.mark.asyncio
-async def test_streak_breaks_on_skip(session):
+async def test_streak_includes_skipped_with_checkin(session):
+    """skipped + checkin_done=True → streak считается (чек-ин был сделан)."""
     await _make_user(session)
     svc = SessionLogService(session)
     log, _ = await svc.get_or_create_today(user_id=1001, day_index=1)
     await svc.update(log, completion_status="skipped", checkin_done=True)
     streak = await svc.streak(user_id=1001)
-    assert streak == 0
+    # Чек-ин сделан (checkin_done=True) → день входит в streak
+    assert streak == 1
 
 
 @pytest.mark.asyncio
@@ -90,11 +92,12 @@ async def test_get_recent_empty(session):
 
 @pytest.mark.asyncio
 async def test_get_recent_returns_data(session):
+    """get_recent() возвращает DayPainData (новая система)."""
     await _make_user(session)
     svc = SessionLogService(session)
     log, _ = await svc.get_or_create_today(user_id=1001, day_index=3)
-    await svc.update(log, sleep_quality=1, effort_level=5, checkin_done=True, completion_status="done")
+    await svc.update(log, pain_level=2, checkin_done=True, completion_status="done")
     recent = await svc.get_recent(user_id=1001)
     assert len(recent) == 1
-    assert recent[0].effort_level == 5
-    assert recent[0].sleep_quality == 1
+    # DayPainData содержит только pain_level (не effort_level)
+    assert recent[0].pain_level == 2

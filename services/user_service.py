@@ -1,9 +1,13 @@
 from datetime import date, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import User
+
+if TYPE_CHECKING:
+    from database.models import WeekPlan
 
 
 class UserService:
@@ -108,15 +112,71 @@ class UserService:
         end = min(start + 6, 28)
         return start, end
 
+    # ── Новая цикловая система ────────────────────────────────────────────────
+
+    async def current_week_plan(self, user_id: int) -> "WeekPlan | None":
+        """
+        Текущая активная WeekPlan (новая цикловая система).
+        Возвращает None если у пользователя нет активной недели или он в старом режиме.
+        """
+        from database.models import WeekPlan
+        today = date.today()
+        result = await self.session.execute(
+            select(WeekPlan)
+            .where(
+                WeekPlan.user_id == user_id,
+                WeekPlan.start_date <= today,
+                WeekPlan.end_date >= today,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    def current_day_in_week(self, user: User) -> int:
+        """
+        Сегодняшний день недели (1=Пн..7=Вс).
+        Используется для поиска DayPlan внутри WeekPlan.
+        """
+        return date.today().isoweekday()
+
+    def weeks_remaining_in_cycle(self, user: User) -> int:
+        """
+        Приблизительное количество недель до конца текущего макроцикла.
+        Использует максимальную длину цикла из constants.py.
+        Возвращает 0 если цикл уже завершён или данных нет.
+        """
+        from engine.constants import get_cycle_max_weeks
+        level = user.level or 1
+        injury_return = getattr(user, "injury_return_active", False)
+        max_weeks = get_cycle_max_weeks(level, injury_return)
+        current_week = user.program_week_number or 1
+        return max(0, max_weeks - current_week)
+
+    # ── Сброс прогресса ───────────────────────────────────────────────────────
+
     async def reset_progress(self, user: User) -> User:
         """Reset user to pre-onboarding state so they can start over."""
         from sqlalchemy import delete
-        from database.models import SessionLog
-        # Delete ALL session logs for this user, not just today's
+        from database.models import SessionLog, WeekPlan, DayPlan
+
+        # Удаляем DayPlan → WeekPlan (FK-порядок)
+        wp_result = await self.session.execute(
+            select(WeekPlan.id).where(WeekPlan.user_id == user.telegram_id)
+        )
+        wp_ids = [row[0] for row in wp_result.fetchall()]
+        if wp_ids:
+            await self.session.execute(
+                delete(DayPlan).where(DayPlan.week_plan_id.in_(wp_ids))
+            )
+        await self.session.execute(
+            delete(WeekPlan).where(WeekPlan.user_id == user.telegram_id)
+        )
+
+        # Удаляем все SessionLog
         await self.session.execute(
             delete(SessionLog).where(SessionLog.user_id == user.telegram_id)
         )
         await self.session.commit()
+
         return await self.update(
             user,
             onboarding_complete=False,
@@ -124,6 +184,20 @@ class UserService:
             program_start_date=None,
             level=None,
             week_repeat_count=0,
+            # Новые поля цикловой системы
+            current_period=None,
+            period_week_number=None,
+            cycle_number=None,
+            program_week_number=None,
+            growth_streak=0,
+            weeks_since_recovery=0,
+            red_flag_active=False,
+            red_flag_reason=None,
+            red_flag_at=None,
+            weekly_target_minutes=None,
+            peak_volume_minutes=None,
+            macrocycle_peak_volume=None,
+            injury_return_active=False,
         )
 
     async def all_active(self) -> list[User]:

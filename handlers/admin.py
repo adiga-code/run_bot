@@ -16,7 +16,7 @@ from keyboards.builders import (
     kb_admin_level_picker, kb_admin_manage, kb_admin_mark_day_picker, kb_admin_mark_day_status,
     kb_admin_menu, kb_admin_report_actions, kb_admin_report_users,
     kb_admin_ref_detail, kb_admin_referrals,
-    kb_admin_start_choice, kb_main_menu,
+    kb_admin_start_choice, kb_coach_override_minutes, kb_completion_v2, kb_main_menu,
 )
 from services.user_service import UserService
 from services.whitelist_service import WhitelistService
@@ -29,6 +29,9 @@ class AdminActionStates(StatesGroup):
     jump_day = State()
     send_msg = State()
     ref_name = State()
+    # Coach override (новая система)
+    override_text = State()    # тренер пишет свой текст тренировки
+    override_minutes = State() # тренер меняет количество минут
 
 router = Router()
 
@@ -355,13 +358,31 @@ async def cb_admin_manage(callback: CallbackQuery, session: AsyncSession) -> Non
         await callback.message.answer(T.admin.user_not_found)
         return
 
-    current_day = await user_svc.current_calendar_day(user) or "?"
     level_name = LEVEL_NAMES.get(user.level, "?")
-    max_day = 42 if getattr(user, "extended_week5", False) else 28
-    week5_status = T.admin.week5_label if getattr(user, "extended_week5", False) else ""
     goal_line = T.onb.goal_labels.get(user.q_goal or "", "—")
     if user.q_goal == "distance":
         goal_line += f" | {T.onb.dist_labels.get(user.q_distance or '', '—')} | {user.q_race_date or '—'}"
+    has_red_flag = bool(getattr(user, "red_flag_active", False))
+
+    # ── Новая цикловая система: показываем WeekPlan ───────────────────────────
+    week_plan_line = ""
+    if user.current_period is not None:
+        week_plan = await user_svc.current_week_plan(user_id)
+        if week_plan:
+            weeks_left = user_svc.weeks_remaining_in_cycle(user)
+            week_plan_line = (
+                f"\n\n📅 <b>Цикловая программа:</b>\n"
+                f"  Неделя {week_plan.week_number} | {week_plan.period}\n"
+                f"  Объём: {week_plan.weekly_target_minutes} мин\n"
+                f"  Осталось недель: ~{weeks_left}"
+            )
+            if has_red_flag:
+                week_plan_line += f"\n  🚩 Red flag: {getattr(user, 'red_flag_reason', '—')}"
+
+    # ── Старая 28-дневная система ────────────────────────────────────────────
+    current_day = "?" if user.current_period is not None else (await user_svc.current_calendar_day(user) or "?")
+    max_day = 42 if getattr(user, "extended_week5", False) else 28
+    week5_status = T.admin.week5_label if getattr(user, "extended_week5", False) else ""
 
     await callback.message.answer(
         T.admin.manage_header.format(
@@ -373,9 +394,14 @@ async def cb_admin_manage(callback: CallbackQuery, session: AsyncSession) -> Non
             city=user.city or "—",
             district=user.district or "—",
             goal_line=goal_line,
-        ),
+        ) + week_plan_line,
         parse_mode="HTML",
-        reply_markup=kb_admin_manage(user_id, extended=getattr(user, "extended_week5", False)),
+        reply_markup=kb_admin_manage(
+            user_id,
+            extended=getattr(user, "extended_week5", False),
+            has_red_flag=has_red_flag,
+            current_period=user.current_period,
+        ),
     )
 
 
@@ -483,10 +509,16 @@ async def cb_checkin_approve(callback: CallbackQuery, session: AsyncSession) -> 
         return
 
     log_svc = SessionLogService(session)
-    wk_svc = WorkoutService(session)
     user_svc = UserService(session)
     user = await user_svc.get_or_raise(user_id)
 
+    # ── Новая цикловая система (L1–L3 с WeekPlan) ────────────────────────────
+    if user.current_period is not None:
+        await _approve_checkin_new(callback, session, user, log, log_svc, version)
+        return
+
+    # ── Старая 28-дневная система ─────────────────────────────────────────────
+    wk_svc = WorkoutService(session)
     day_type = await wk_svc.get_day_type(user.level, log.day_index) or "run"
 
     if version == "rest":
@@ -1250,8 +1282,29 @@ async def _activate_user(
 
     start_date = date.today() if start_today else date.today() + timedelta(days=1)
     await user_svc.update(user, level=level, status="active", program_start_date=start_date)
+    # Перечитываем user после update (refresh)
+    user = await user_svc.get_or_raise(user_id)
 
-    if start_today:
+    # ── Новая цикловая система (L1-L3) ────────────────────────────────────────
+    if level <= 3 and user.current_period is not None:
+        from services.week_plan_service import WeekPlanService
+        wk_plan_svc = WeekPlanService(session)
+        try:
+            await wk_plan_svc.create_first_week(user)
+            logger.info(
+                "Admin %s activated user %s (level=%s) — WeekPlan created",
+                callback.from_user.id, user_id, level,
+            )
+        except Exception:
+            logger.exception("Failed to create WeekPlan for user %s on activation", user_id)
+
+        if start_today:
+            logger.info("Admin %s activated user %s with start_today (new system)", callback.from_user.id, user_id)
+        else:
+            logger.info("Admin %s activated user %s (start tomorrow, level=%s, new system)", callback.from_user.id, user_id, level)
+
+    # ── Старая система (L4/L5 или current_period=None) ───────────────────────
+    elif start_today:
         from database.models import SessionLog
         day1_log = SessionLog(
             user_id=user.telegram_id,
@@ -1485,3 +1538,376 @@ async def cb_ref_users(callback: CallbackQuery, session: AsyncSession) -> None:
         parse_mode="HTML",
         reply_markup=kb_admin_ref_detail(code, link.is_active),
     )
+
+
+# ── Новая система: вспомогательная функция для одобрения чек-ина ─────────────
+
+async def _approve_checkin_new(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    user,
+    log,
+    log_svc,
+    version: str,
+) -> None:
+    """
+    Одобрение чек-ина для пользователей новой цикловой системы (L1–L3).
+    Рендерит WorkoutTemplate с planned_minutes из лога и отправляет пользователю.
+    """
+    from datetime import date as date_cls
+    from sqlalchemy import select as sa_select
+    from database.models import DayPlan, WorkoutTemplate
+    from engine.workout_renderer import render_workout
+
+    # ── Определяем day_type/run_subtype из DayPlan ───────────────────────────
+    day_type = "run"
+    run_subtype = None
+    if log.day_plan_id:
+        dp_res = await session.execute(
+            sa_select(DayPlan).where(DayPlan.id == log.day_plan_id)
+        )
+        day_plan = dp_res.scalar_one_or_none()
+        if day_plan:
+            day_type = day_plan.day_type
+            run_subtype = day_plan.run_subtype
+
+    # ── Rest / shortcut ───────────────────────────────────────────────────────
+    if version == "rest":
+        await log_svc.update(log, assigned_version="rest", approval_pending=False)
+        await callback.bot.send_message(
+            chat_id=log.user_id,
+            text=T.checkin.rest_day,
+            reply_markup=kb_main_menu(),
+        )
+        logger.info(
+            "Admin %s approved checkin (new) for user %s → rest",
+            callback.from_user.id, log.user_id,
+        )
+        await callback.message.edit_reply_markup()
+        await callback.message.answer(
+            T.admin.sent_ok.format(
+                version_label=T.admin.version_labels.get("rest", "rest"),
+                name=user.full_name,
+            )
+        )
+        return
+
+    # ── Ищем WorkoutTemplate: сначала period-specific, затем универсальный ───
+    target_minutes = log.planned_minutes or user.weekly_target_minutes or 30
+    tmpl = None
+    for period_filter in (user.current_period, None):
+        q = sa_select(WorkoutTemplate).where(
+            WorkoutTemplate.level == user.level,
+            WorkoutTemplate.day_type == day_type,
+            WorkoutTemplate.version == version,
+        )
+        if period_filter is not None:
+            q = q.where(WorkoutTemplate.period == period_filter)
+        else:
+            q = q.where(WorkoutTemplate.period.is_(None))
+        if run_subtype:
+            q = q.where(WorkoutTemplate.run_subtype == run_subtype)
+        res = await session.execute(q.limit(1))
+        tmpl = res.scalar_one_or_none()
+        if tmpl:
+            break
+
+    # ── Рендер ───────────────────────────────────────────────────────────────
+    if tmpl:
+        rendered = render_workout(tmpl, target_minutes, version)
+        dow = log.day_of_week or date_cls.today().isoweekday()
+        week_num = user.program_week_number or 1
+        header = T.checkin.workout_header_new.format(
+            week=week_num, dow=dow, title=rendered.title,
+        )
+        workout_text = header + "\n\n" + rendered.text
+    else:
+        workout_text = T.checkin.no_template_fallback
+
+    await log_svc.update(log, assigned_version=version, approval_pending=False)
+    await callback.bot.send_message(
+        chat_id=log.user_id,
+        text=workout_text,
+        parse_mode="HTML",
+        reply_markup=kb_completion_v2(),
+    )
+
+    logger.info(
+        "Admin %s approved checkin (new) for user %s → %s (%d min)",
+        callback.from_user.id, log.user_id, version, target_minutes,
+    )
+    await callback.message.edit_reply_markup()
+    version_label = T.admin.version_labels.get(version, version)
+    await callback.message.answer(
+        T.admin.sent_ok.format(version_label=version_label, name=user.full_name),
+        reply_markup=kb_coach_override_minutes(log.user_id),
+    )
+
+
+# ── Red flag: снятие ─────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("adm:red_flag:remove:"))
+async def cb_remove_red_flag(callback: CallbackQuery, session: AsyncSession) -> None:
+    """Снять red flag с пользователя."""
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+
+    user_id = int(callback.data.split(":")[3])
+    await safe_answer(callback)
+
+    user_svc = UserService(session)
+    user = await user_svc.get(user_id)
+    if not user:
+        await callback.message.answer(T.admin.user_not_found)
+        return
+
+    await user_svc.update(
+        user,
+        red_flag_active=False,
+        red_flag_reason=None,
+        red_flag_at=None,
+    )
+    logger.info("Admin %s removed red flag for user %s", callback.from_user.id, user_id)
+
+    await callback.message.answer(
+        f"🚩 Red flag снят для <b>{user.full_name}</b>.",
+        parse_mode="HTML",
+        reply_markup=kb_admin_manage(
+            user_id,
+            has_red_flag=False,
+            current_period=user.current_period,
+        ),
+    )
+
+
+# ── Coach override: свой текст ────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("adm:override:text:"))
+async def cb_override_text_start(callback: CallbackQuery, state: FSMContext) -> None:
+    """Тренер вводит произвольный текст тренировки для пользователя."""
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+
+    user_id = int(callback.data.split(":")[3])
+    await safe_answer(callback)
+    await state.set_state(AdminActionStates.override_text)
+    await state.update_data(target_user_id=user_id)
+    await callback.message.answer(
+        "✏️ Введи текст тренировки, который получит пользователь.\n\n"
+        "Поддерживается HTML-форматирование (<b>жирный</b>, <i>курсив</i>)."
+    )
+
+
+@router.message(AdminActionStates.override_text)
+async def admin_override_text_input(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    """Получает текст тренировки от тренера и отправляет пользователю."""
+    if not is_admin(message.from_user.id):
+        return
+
+    data = await state.get_data()
+    target_user_id = data["target_user_id"]
+    await state.clear()
+
+    from datetime import date as date_cls
+    from sqlalchemy import select
+    from database.models import SessionLog
+    from services.session_log_service import SessionLogService
+
+    result = await session.execute(
+        select(SessionLog).where(
+            SessionLog.user_id == target_user_id,
+            SessionLog.date == date_cls.today(),
+        )
+    )
+    log = result.scalar_one_or_none()
+
+    user_svc = UserService(session)
+    user = await user_svc.get(target_user_id)
+
+    if log:
+        log_svc = SessionLogService(session)
+        await log_svc.update(log, assigned_version="custom", approval_pending=False)
+
+    try:
+        use_v2 = user is not None and user.current_period is not None
+        await message.bot.send_message(
+            chat_id=target_user_id,
+            text=message.text,
+            parse_mode="HTML",
+            reply_markup=kb_completion_v2() if use_v2 else None,
+        )
+        name = user.full_name if user else str(target_user_id)
+        logger.info(
+            "Admin %s sent custom workout text to user %s", message.from_user.id, target_user_id
+        )
+        await message.answer(f"✅ Текст тренировки отправлен → <b>{name}</b>.", parse_mode="HTML")
+    except Exception as e:
+        await message.answer(T.admin.message_failed.format(error=e))
+
+
+# ── Coach override: изменить минуты ──────────────────────────────────────────
+
+async def _resend_workout_with_minutes(
+    bot,
+    session: AsyncSession,
+    admin_id: int,
+    user_id: int,
+    new_minutes: int,
+) -> str:
+    """
+    Перерендеривает тренировку для пользователя с новым количеством минут
+    и отправляет ему. Возвращает имя пользователя для подтверждения.
+    """
+    from datetime import date as date_cls
+    from sqlalchemy import select as sa_select
+    from database.models import DayPlan, SessionLog, WorkoutTemplate
+    from engine.workout_renderer import render_workout
+
+    result = await session.execute(
+        sa_select(SessionLog).where(
+            SessionLog.user_id == user_id,
+            SessionLog.date == date_cls.today(),
+        )
+    )
+    log = result.scalar_one_or_none()
+
+    user_svc = UserService(session)
+    user = await user_svc.get(user_id)
+    if not user or not log:
+        return "?"
+
+    version = log.assigned_version or "base"
+    day_type = "run"
+    run_subtype = None
+
+    if log.day_plan_id:
+        dp_res = await session.execute(
+            sa_select(DayPlan).where(DayPlan.id == log.day_plan_id)
+        )
+        dp = dp_res.scalar_one_or_none()
+        if dp:
+            day_type = dp.day_type
+            run_subtype = dp.run_subtype
+
+    # Ищем шаблон (period-specific → универсальный)
+    tmpl = None
+    for period_filter in (user.current_period, None):
+        q = sa_select(WorkoutTemplate).where(
+            WorkoutTemplate.level == user.level,
+            WorkoutTemplate.day_type == day_type,
+            WorkoutTemplate.version == version,
+        )
+        if period_filter is not None:
+            q = q.where(WorkoutTemplate.period == period_filter)
+        else:
+            q = q.where(WorkoutTemplate.period.is_(None))
+        if run_subtype:
+            q = q.where(WorkoutTemplate.run_subtype == run_subtype)
+        res = await session.execute(q.limit(1))
+        tmpl = res.scalar_one_or_none()
+        if tmpl:
+            break
+
+    if tmpl:
+        rendered = render_workout(tmpl, new_minutes, version)
+        dow = log.day_of_week or date_cls.today().isoweekday()
+        week_num = user.program_week_number or 1
+        header = T.checkin.workout_header_new.format(
+            week=week_num, dow=dow, title=rendered.title,
+        )
+        workout_text = header + "\n\n" + rendered.text
+    else:
+        workout_text = T.checkin.no_template_fallback
+
+    from services.session_log_service import SessionLogService
+    log_svc = SessionLogService(session)
+    await log_svc.update(log, planned_minutes=new_minutes)
+
+    await bot.send_message(
+        chat_id=user_id,
+        text=workout_text,
+        parse_mode="HTML",
+        reply_markup=kb_completion_v2(),
+    )
+    logger.info(
+        "Admin %s resent workout to user %s with %d min", admin_id, user_id, new_minutes
+    )
+    return user.full_name
+
+
+@router.callback_query(
+    F.data.startswith("adm:override:mins:")
+    & ~F.data.startswith("adm:override:mins_custom:")
+)
+async def cb_override_minutes_send(callback: CallbackQuery, session: AsyncSession) -> None:
+    """adm:override:mins:<user_id>:<mins> — перерендер тренировки с указанными минутами."""
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+
+    parts = callback.data.split(":")
+    user_id, new_minutes = int(parts[3]), int(parts[4])
+    await safe_answer(callback)
+
+    try:
+        name = await _resend_workout_with_minutes(
+            callback.bot, session, callback.from_user.id, user_id, new_minutes
+        )
+        await callback.message.answer(
+            f"✅ Тренировка (<b>{new_minutes} мин</b>) отправлена → <b>{name}</b>.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        logger.exception("Failed to resend workout with minutes for user %s", user_id)
+        await callback.message.answer("❌ Не удалось отправить тренировку.")
+
+
+@router.callback_query(F.data.startswith("adm:override:mins_custom:"))
+async def cb_override_mins_custom_start(callback: CallbackQuery, state: FSMContext) -> None:
+    """Тренер вводит произвольное количество минут."""
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+
+    user_id = int(callback.data.split(":")[3])
+    await safe_answer(callback)
+    await state.set_state(AdminActionStates.override_minutes)
+    await state.update_data(target_user_id=user_id)
+    await callback.message.answer("✏️ Введи количество минут (целое число):")
+
+
+@router.message(AdminActionStates.override_minutes)
+async def admin_override_mins_input(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    """Получает введённое тренером число минут и отправляет перерендеренную тренировку."""
+    if not is_admin(message.from_user.id):
+        return
+
+    data = await state.get_data()
+    target_user_id = data["target_user_id"]
+
+    try:
+        new_minutes = int(message.text.strip())
+        assert 5 <= new_minutes <= 300
+    except Exception:
+        await message.answer("⚠️ Введи число минут от 5 до 300.")
+        return
+
+    await state.clear()
+
+    try:
+        name = await _resend_workout_with_minutes(
+            message.bot, session, message.from_user.id, target_user_id, new_minutes
+        )
+        await message.answer(
+            f"✅ Тренировка (<b>{new_minutes} мин</b>) отправлена → <b>{name}</b>.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        logger.exception("Failed to resend workout with custom minutes for user %s", target_user_id)
+        await message.answer("❌ Не удалось отправить тренировку.")

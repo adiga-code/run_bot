@@ -1,145 +1,80 @@
+"""
+engine/rule_engine.py
+Выбор версии тренировки по результатам чек-ина.
+Новая логика (spec раздел 3.7.1) — упрощённый приоритет без fatigue-детектора.
+"""
+from __future__ import annotations
+
 from dataclasses import dataclass
 
-from engine.red_flags import CheckinData, detect_red_flag
-from engine.fatigue import RecentLogData, detect_cumulative_fatigue, detect_severe_fatigue, detect_persistent_pain
+
+@dataclass
+class CheckinData:
+    """Данные утреннего чек-ина."""
+    wellbeing: int       # 1=плохо, 2=тяжеловато, 3=нормально, 4=отлично
+    sleep_quality: int   # 1=плохо, 2=средне, 3=хорошо
+    pain_level: int      # 1=нет (0-2/10), 2=немного (3-5/10), 3=есть (6-10/10)
+    stress_level: int    # 1=низкий, 2=средний, 3=высокий
+
+
+@dataclass
+class RecentDayData:
+    """Минимальный слепок предыдущего дня для rule_engine."""
+    pain_level: int      # 1/2/3, None-безопасно не нужен — передаём 1 если нет данных
 
 
 @dataclass
 class WorkoutDecision:
-    version: str           # base / light / recovery / rest
-    reason: str            # human-readable reason (for logs/telemetry)
-    red_flag: bool
-    fatigue_reduction: bool
+    version: str   # base / light / recovery / rest
+    reason: str    # human-readable (для логов / телеметрии)
 
 
 def decide_workout_version(
     checkin: CheckinData,
-    recent_logs: list[RecentLogData],
     day_type: str,
-    prev_day_type: str | None = None,
+    yesterday: RecentDayData | None = None,
 ) -> WorkoutDecision:
     """
-    Выбор версии тренировки по приоритетной системе (сверху вниз):
+    Выбор версии тренировки по приоритету (раздел 3.7.1 spec):
 
-    0. День отдыха → rest
-
-    🚨 КРАСНЫЕ ФЛАГИ (→ Recovery):
-       - Боль «есть» (уровень 3)
-       - Боль «немного» 2+ дня подряд (история)
-       - Самочувствие плохо + стресс высокий
-
-    1. Боль (приоритет 1):
-       - боль = есть (3)  → Recovery
-       - боль = немного (2) → Light
-
-    2. Возврат после боли:
-       - вчера была боль, сегодня нет → 1 день Light
-
-    3. Самочувствие (приоритет 2):
-       - самочувствие = плохо (1) → Light
-
-    4. Сон и стресс (приоритет 3):
-       - сон = плохо (1) ИЛИ стресс = высокий (3) → Light
-
-    5. Накопленная усталость (история):
-       - 3 тяжёлых дня → Recovery
-       - 2 тяжёлых дня → Light
-
-    6. Всё нормально → Base
+    1. day_type == "rest"                        → Rest
+    2. pain == 3 (есть)                          → Recovery
+    3. pain == 2 (немного)                       → Light
+    4. wellbeing == 1 (плохо)                    → Light
+    5. sleep == 1 ИЛИ stress == 3               → Light
+    6. Возврат после боли:
+       вчера pain ≥ 2, сегодня pain == 1         → Light (1 день)
+    7. Иначе                                     → Base
     """
-    # ── 0. День отдыха ────────────────────────────────────────────────────────
+    # ── 1. День отдыха ───────────────────────────────────────────────────────
     if day_type == "rest":
-        return WorkoutDecision(
-            version="rest",
-            reason="день отдыха по плану",
-            red_flag=False,
-            fatigue_reduction=False,
-        )
+        return WorkoutDecision(version="rest", reason="день отдыха по плану")
 
-    # ── 🚨 Красный флаг: боль 2+ дня подряд ─────────────────────────────────
-    if detect_persistent_pain(recent_logs):
-        return WorkoutDecision(
-            version="recovery",
-            reason="боль 2+ дня подряд — красный флаг",
-            red_flag=True,
-            fatigue_reduction=False,
-        )
-
-    # ── 🚨 Красный флаг: боль есть (6-10) ────────────────────────────────────
+    # ── 2. Боль «есть» ───────────────────────────────────────────────────────
     if checkin.pain_level == 3:
-        return WorkoutDecision(
-            version="recovery",
-            reason="боль: есть (6–10) — красный флаг",
-            red_flag=True,
-            fatigue_reduction=False,
-        )
+        return WorkoutDecision(version="recovery", reason="боль: есть (6–10/10)")
 
-    # ── 🚨 Красный флаг: плохо + высокий стресс ──────────────────────────────
-    if detect_red_flag(checkin):
-        return WorkoutDecision(
-            version="recovery",
-            reason="плохое самочувствие + высокий стресс — красный флаг",
-            red_flag=True,
-            fatigue_reduction=False,
-        )
-
-    # ── Приоритет 1: боль немного (3-5) ──────────────────────────────────────
+    # ── 3. Боль «немного» ────────────────────────────────────────────────────
     if checkin.pain_level == 2:
-        return WorkoutDecision(
-            version="light",
-            reason="боль: немного (3–5)",
-            red_flag=False,
-            fatigue_reduction=False,
-        )
+        return WorkoutDecision(version="light", reason="боль: немного (3–5/10)")
 
-    # ── Возврат после боли: вчера болело → сегодня 1 день light ──────────────
-    if recent_logs and recent_logs[-1].pain_level >= 2:
-        return WorkoutDecision(
-            version="light",
-            reason="восстановление после боли — 1 день light",
-            red_flag=False,
-            fatigue_reduction=True,
-        )
-
-    # ── Приоритет 2: самочувствие плохо ──────────────────────────────────────
+    # ── 4. Самочувствие плохо ────────────────────────────────────────────────
     if checkin.wellbeing == 1:
-        return WorkoutDecision(
-            version="light",
-            reason="самочувствие: плохо",
-            red_flag=False,
-            fatigue_reduction=False,
-        )
+        return WorkoutDecision(version="light", reason="самочувствие: плохо")
 
-    # ── Приоритет 3: сон плохой или стресс высокий ───────────────────────────
+    # ── 5. Плохой сон или высокий стресс ─────────────────────────────────────
     if checkin.sleep_quality == 1 or checkin.stress_level == 3:
         return WorkoutDecision(
             version="light",
             reason="плохой сон или высокий стресс",
-            red_flag=False,
-            fatigue_reduction=False,
         )
 
-    # ── Накопленная усталость (история) ──────────────────────────────────────
-    if detect_severe_fatigue(recent_logs):
-        return WorkoutDecision(
-            version="recovery",
-            reason="3 тяжёлых дня подряд — принудительное восстановление",
-            red_flag=False,
-            fatigue_reduction=True,
-        )
-
-    if detect_cumulative_fatigue(recent_logs):
+    # ── 6. Возврат после боли ────────────────────────────────────────────────
+    if yesterday is not None and yesterday.pain_level >= 2 and checkin.pain_level == 1:
         return WorkoutDecision(
             version="light",
-            reason="накопленная усталость (2+ тяжёлых дня) — снижение нагрузки",
-            red_flag=False,
-            fatigue_reduction=True,
+            reason="восстановление после боли — 1 день light",
         )
 
-    # ── Всё нормально → Base ─────────────────────────────────────────────────
-    return WorkoutDecision(
-        version="base",
-        reason="хорошее самочувствие",
-        red_flag=False,
-        fatigue_reduction=False,
-    )
+    # ── 7. Всё нормально ─────────────────────────────────────────────────────
+    return WorkoutDecision(version="base", reason="хорошее самочувствие")

@@ -1,17 +1,24 @@
+"""
+handlers/checkin.py
+Утренний check-in: старая (28-день) и новая (WeekPlan) системы параллельно.
+Ключевое условие: user.current_period is not None → новая система.
+"""
 import logging
+from datetime import date, datetime, timezone
 
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from data.interpretations import get_interpretation
 from texts import T
-from engine.red_flags import CheckinData
-from engine.rule_engine import decide_workout_version
+from engine.rule_engine import CheckinData, RecentDayData, WorkoutDecision, decide_workout_version
+from engine.workout_renderer import RenderedWorkout, render_workout, render_rest_day, render_recovery_day
 from keyboards.builders import (
     kb_main_menu, kb_completion, kb_completion_strength, kb_mark_workout,
     kb_pain_checkin, kb_sleep, kb_stress, kb_wellbeing,
@@ -22,6 +29,7 @@ from handlers.utils import safe_answer, filter_strength_text, get_tip_lines, sen
 from services.session_log_service import SessionLogService
 from services.user_service import UserService
 from services.workout_service import WorkoutService
+from services.week_plan_service import WeekPlanService
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +40,7 @@ _STRESS_LABELS    = T.checkin.stress_labels
 _VERSION_LABELS   = T.checkin.version_labels
 _PAIN_HIST        = T.checkin.pain_hist
 _WELLBEING_HIST   = T.checkin.wellbeing_hist
+_DAY_TYPE_LABELS  = T.checkin.day_type_labels
 
 
 def _build_history_line(recent_logs) -> str:
@@ -44,7 +53,7 @@ def _build_history_line(recent_logs) -> str:
         pain = _PAIN_HIST.get(log.pain_level, "?")
         parts.append(T.checkin.history_line_fmt.format(wb=wb, pain=pain))
     return T.checkin.history_header.format(parts=" → ".join(parts))
-_DAY_TYPE_LABELS = T.checkin.day_type_labels
+
 
 router = Router()
 
@@ -70,9 +79,7 @@ async def _check_yesterday_and_start(
     target, state: FSMContext, log_svc: SessionLogService
 ) -> bool:
     """Check if yesterday's log needs completion. Returns True if we intercepted."""
-    user_id = (
-        target.from_user.id if isinstance(target, Message) else target.from_user.id
-    )
+    user_id = target.from_user.id
     yesterday_log = await log_svc.get_yesterday(user_id)
     if yesterday_log and yesterday_log.completion_status is None:
         await state.set_state(CheckinStates.yesterday)
@@ -185,6 +192,12 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
             await callback.message.answer(T.checkin.approval_pending, reply_markup=kb_main_menu(checkin_done=True))
             return
 
+        # ── Новая система: рендер по workout_renderer ─────────────────────────
+        if user.current_period is not None and log.week_plan_id:
+            await _show_today_new(callback, session, user, log)
+            return
+
+        # ── Старая система: рендер по old Workout ────────────────────────────
         if log.assigned_workout_id:
             workout = await wk_svc.get_by_id(log.assigned_workout_id)
             if workout:
@@ -195,7 +208,8 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
                 is_strength = workout.day_type == "strength" and log.assigned_version != "recovery"
                 already_marked = log.completion_status is not None
                 calendar_day = user_svc.log_calendar_day(user, log)
-                tips = get_tip_lines(user.level, log.day_index)  # template day for tips
+                template_day = log.day_index
+                tips = get_tip_lines(user.level, template_day)
                 tips_block = f"\n\n{tips}" if tips else ""
                 await callback.message.answer(
                     T.checkin.workout_header.format(calendar_day=calendar_day, max_day=user_svc._max_day(user), title=workout.title) + tips_block + f"\n\n{workout_text}",
@@ -218,6 +232,79 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
     await callback.message.answer(T.checkin.no_checkin_yet, reply_markup=kb_main_menu())
 
 
+async def _show_today_new(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    user,
+    log,
+) -> None:
+    """Показывает тренировку пользователю в новой системе (по WorkoutTemplate)."""
+    from database.models import WorkoutTemplate, DayPlan
+    already_marked = log.completion_status is not None
+
+    if log.day_plan_id:
+        dp_result = await session.execute(
+            select(DayPlan).where(DayPlan.id == log.day_plan_id)
+        )
+        day_plan = dp_result.scalar_one_or_none()
+    else:
+        day_plan = None
+
+    if day_plan is None or log.assigned_version in ("rest", None):
+        rendered = render_rest_day()
+    elif log.assigned_version == "recovery":
+        rendered = render_recovery_day()
+    else:
+        template = None
+        if day_plan.run_subtype or day_plan.day_type == "strength":
+            from sqlalchemy.orm import selectinload
+            from database.models import WeekPlan
+            wp_result = await session.execute(
+                select(WeekPlan).where(WeekPlan.id == log.week_plan_id)
+            )
+            week_plan = wp_result.scalar_one_or_none()
+            template = await _get_workout_template(
+                session=session,
+                level=user.level or 1,
+                period=week_plan.period if week_plan else None,
+                day_type=day_plan.day_type,
+                run_subtype=day_plan.run_subtype,
+                version=log.assigned_version,
+                strength_format=user.strength_format if day_plan.day_type == "strength" else None,
+            )
+        if template:
+            rendered = render_workout(
+                template=template,
+                target_minutes=log.planned_minutes or day_plan.planned_minutes or 0,
+                version=log.assigned_version,
+                intensity_kind=day_plan.run_subtype,
+                long_stage=2 if getattr(user, "l1_long_independent", False) else 1,
+            )
+        else:
+            rendered = RenderedWorkout(
+                title="Тренировка",
+                text=T.checkin.no_template_fallback,
+                planned_minutes=log.planned_minutes or 0,
+                version=log.assigned_version or "base",
+            )
+
+    is_strength = day_plan is not None and day_plan.day_type == "strength" and log.assigned_version != "recovery"
+    header = T.checkin.workout_header_new.format(
+        week=log.week_plan_id or "—",
+        dow=log.day_of_week or "—",
+        title=rendered.title,
+    )
+    await callback.message.answer(
+        f"{header}\n\n{rendered.text}",
+        parse_mode="HTML",
+        reply_markup=(
+            kb_main_menu() if already_marked
+            else kb_completion_strength() if is_strength
+            else kb_completion()
+        ),
+    )
+
+
 # ── Yesterday completion ──────────────────────────────────────────────────────
 
 @router.callback_query(CheckinStates.yesterday, F.data.startswith("ci:yday:"))
@@ -227,13 +314,13 @@ async def ci_yesterday(callback: CallbackQuery, state: FSMContext, session: Asyn
     yesterday_log = await log_svc.get_yesterday(callback.from_user.id)
     if yesterday_log:
         await log_svc.update(yesterday_log, completion_status=status)
-        logger.info("User %s marked yesterday (day %s) as %s", callback.from_user.id, yesterday_log.day_index, status)
+        logger.info("User %s marked yesterday as %s", callback.from_user.id, status)
     await callback.message.edit_reply_markup()
     await safe_answer(callback)
     await _start_checkin(callback, state)
 
 
-# ── Wellbeing ─────────────────────────────────────────────────────────────────
+# ── Wellbeing ─────────────────────────────────────────────────────────────��───
 
 @router.callback_query(CheckinStates.wellbeing, F.data.startswith("ci:wellbeing:"))
 async def ci_wellbeing(callback: CallbackQuery, state: FSMContext) -> None:
@@ -273,7 +360,7 @@ async def ci_pain(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(pain=value)
     await callback.message.edit_reply_markup()
 
-    # Для боли ≥ 2 показываем предупреждение об усилении боли в тренировке
+    # Для боли ≥ 2 показываем предупреждение
     if value >= 2:
         await callback.answer(T.checkin.pain_warning, show_alert=True)
     else:
@@ -296,15 +383,15 @@ async def ci_stress(callback: CallbackQuery, state: FSMContext, session: AsyncSe
     await _finish_checkin(callback, data, session)
 
 
-# ── Core logic ────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════���═════════════════
+# Core logic — dispatcher
+# ══════════════════════════════════════════════════════════════════════════════
 
 async def _finish_checkin(
     callback: CallbackQuery,
     data: dict,
     session: AsyncSession,
 ) -> None:
-    user_id = callback.from_user.id
-
     checkin = CheckinData(
         wellbeing=data["wellbeing"],
         sleep_quality=data["sleep"],
@@ -313,67 +400,319 @@ async def _finish_checkin(
     )
 
     user_svc = UserService(session)
+    user = await user_svc.get_or_raise(callback.from_user.id)
+
+    # ── Маршрутизация: новая система vs старая 28-день ────────────────────────
+    if user.current_period is not None:
+        await _finish_checkin_new(callback, checkin, session, user)
+    else:
+        await _finish_checkin_old(callback, checkin, session, user)
+
+
+# ═════════════════════════════════���════════════════════════════════════════════
+# NEW system path (WeekPlan / WorkoutTemplate)
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def _finish_checkin_new(
+    callback: CallbackQuery,
+    checkin: CheckinData,
+    session: AsyncSession,
+    user,
+) -> None:
+    user_id = callback.from_user.id
     log_svc = SessionLogService(session)
-    wk_svc = WorkoutService(session)
+    wk_plan_svc = WeekPlanService(session)
 
-    user = await user_svc.get_or_raise(user_id)
-    calendar_day = await user_svc.current_calendar_day(user) or 1
-    template_day = await user_svc.current_template_day(user) or 1
-    recent_logs = await log_svc.get_recent(user_id)
-    day_type = await wk_svc.get_day_type(user.level, template_day) or "run"
+    # Получаем WeekPlan и DayPlan на сегодня
+    week_plan = await wk_plan_svc.get_current(user_id)
+    day_plan = None
+    if week_plan:
+        today_dow = date.today().isoweekday()
+        for dp in week_plan.days:
+            if dp.day_of_week == today_dow:
+                day_plan = dp
+                break
 
-    prev_day_type = await wk_svc.get_day_type(user.level, max(1, template_day - 1))
+    if not week_plan or not day_plan:
+        # Нет активного плана — сохраняем чекин без тренировки
+        log, _ = await log_svc.get_or_create_today(user_id, date.today().isoweekday())
+        await log_svc.update(
+            log,
+            wellbeing=checkin.wellbeing,
+            sleep_quality=checkin.sleep_quality,
+            pain_level=checkin.pain_level,
+            stress_level=checkin.stress_level,
+            checkin_done=True,
+            checkin_at=datetime.now(timezone.utc),
+        )
+        await callback.message.answer(T.checkin.no_plan_yet, reply_markup=kb_main_menu(checkin_done=True))
+        return
 
-    decision = decide_workout_version(checkin, recent_logs, day_type, prev_day_type)
-    workout = await wk_svc.get(
-        user.level, template_day, decision.version,
-        strength_format=user.strength_format if day_type == "strength" else None,
+    # Manual mode (L4/L5): тренер ведёт вручную
+    level = user.level or 1
+    is_manual = level >= 4
+    if is_manual:
+        await _finish_checkin_manual(callback, checkin, session, user, week_plan, day_plan)
+        return
+
+    # Вчерашний лог для детектора "возврат после боли"
+    yesterday_log = await log_svc.get_yesterday(user_id)
+    yesterday_data = RecentDayData(
+        pain_level=yesterday_log.pain_level if yesterday_log and yesterday_log.pain_level else 1
     )
 
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
+    # Решение о версии тренировки
+    decision = decide_workout_version(checkin, day_plan.day_type, yesterday_data)
 
-    # Admins doing their own check-in bypass the approval flow — no trainer needed.
+    # Ищем шаблон тренировки
+    template = await _get_workout_template(
+        session=session,
+        level=level,
+        period=week_plan.period,
+        day_type=day_plan.day_type,
+        run_subtype=day_plan.run_subtype,
+        version=decision.version,
+        strength_format=user.strength_format if day_plan.day_type == "strength" else None,
+    )
+
+    # Рендер тренировки
+    if decision.version == "rest" or day_plan.day_type == "rest":
+        rendered = render_rest_day()
+    elif decision.version == "recovery":
+        rendered = render_recovery_day()
+    elif template:
+        rendered = render_workout(
+            template=template,
+            target_minutes=day_plan.planned_minutes or 0,
+            version=decision.version,
+            intensity_kind=day_plan.run_subtype,
+            long_stage=2 if getattr(user, "l1_long_independent", False) else 1,
+        )
+    else:
+        # Шаблон не найден — заглушка
+        rendered = RenderedWorkout(
+            title=f"Тренировка ({decision.version})",
+            text=T.checkin.no_template_fallback,
+            planned_minutes=day_plan.planned_minutes or 0,
+            version=decision.version,
+        )
+
+    now = datetime.now(timezone.utc)
     user_is_admin = user_id in settings.admin_ids
 
-    # Log stores template_day for workout lookups; calendar_day is derived from log.date.
-    log, created = await log_svc.get_or_create_today(user_id, template_day)
-    is_recheck = not created  # пользователь повторно проходит чекин сегодня
+    log, created = await log_svc.get_or_create_today(user_id, day_plan.day_of_week)
+    is_recheck = not created
+    recheckin_count = (getattr(log, "recheckin_count", 0) or 0) + (1 if is_recheck else 0)
+
     await log_svc.update(
         log,
         wellbeing=checkin.wellbeing,
         sleep_quality=checkin.sleep_quality,
         pain_level=checkin.pain_level,
-        pain_increases=checkin.pain_increases,
+        stress_level=checkin.stress_level,
+        assigned_version=decision.version,
+        checkin_done=True,
+        approval_pending=not user_is_admin,
+        checkin_at=now,
+        # Поля новой системы
+        week_plan_id=week_plan.id,
+        day_plan_id=day_plan.id,
+        day_of_week=day_plan.day_of_week,
+        planned_minutes=rendered.planned_minutes,
+        recheckin_count=recheckin_count,
+        last_checkin_at=now,
+    )
+
+    logger.info(
+        "Checkin (new) user=%s dow=%s period=%s version=%s reason=%s",
+        user_id, day_plan.day_of_week, week_plan.period, decision.version, decision.reason,
+    )
+
+    # Отправляем интерпретацию пользователю
+    try:
+        interpretation = get_interpretation(
+            version=decision.version,
+            checkin_wellbeing=checkin.wellbeing,
+            red_flag=False,
+            fatigue_reduction=False,
+            pain_level=checkin.pain_level,
+        )
+        await callback.message.answer(interpretation)
+    except Exception:
+        pass
+
+    if user_is_admin:
+        # Тренер сам проверяет — отправляем тренировку сразу
+        header = T.checkin.workout_header_new.format(
+            week=week_plan.week_number,
+            dow=day_plan.day_of_week,
+            title=rendered.title,
+        )
+        is_strength = day_plan.day_type == "strength" and decision.version != "recovery"
+        await callback.message.answer(
+            f"{header}\n\n{rendered.text}",
+            parse_mode="HTML",
+            reply_markup=kb_completion_strength() if is_strength else kb_completion(),
+        )
+        return
+
+    # Ждём одобрения тренера
+    await callback.message.answer(T.checkin.waiting_trainer, reply_markup=kb_main_menu(checkin_done=True))
+
+    # Карточка для тренера
+    day_type_label = _DAY_TYPE_LABELS.get(day_plan.day_type, day_plan.day_type)
+    recheck_suffix = T.checkin.recheck_label if is_recheck else ""
+    card = T.checkin.admin_card_new.format(
+        name=user.full_name + recheck_suffix,
+        week=week_plan.week_number,
+        period=week_plan.period,
+        dow=day_plan.day_of_week,
+        day_type=day_type_label,
+        wellbeing=_WELLBEING_LABELS.get(checkin.wellbeing, "?"),
+        sleep=_SLEEP_LABELS.get(checkin.sleep_quality, "?"),
+        pain=_PAIN_LABELS.get(checkin.pain_level, "?"),
+        stress=_STRESS_LABELS.get(checkin.stress_level, "?"),
+        version=_VERSION_LABELS.get(decision.version, decision.version),
+        reason=decision.reason,
+        minutes=rendered.planned_minutes,
+    )
+    for admin_id in settings.admin_ids:
+        try:
+            await callback.bot.send_message(
+                chat_id=admin_id,
+                text=card,
+                parse_mode="HTML",
+                reply_markup=kb_checkin_approve(user_id),
+            )
+        except Exception:
+            logger.warning("Could not send approval card to admin %s", admin_id)
+
+
+async def _finish_checkin_manual(
+    callback: CallbackQuery,
+    checkin: CheckinData,
+    session: AsyncSession,
+    user,
+    week_plan,
+    day_plan,
+) -> None:
+    """L4/L5: сохраняем чекин, отправляем карточку тренеру без авто-версии."""
+    user_id = callback.from_user.id
+    log_svc = SessionLogService(session)
+    now = datetime.now(timezone.utc)
+    user_is_admin = user_id in settings.admin_ids
+
+    log, created = await log_svc.get_or_create_today(user_id, day_plan.day_of_week)
+    is_recheck = not created
+
+    await log_svc.update(
+        log,
+        wellbeing=checkin.wellbeing,
+        sleep_quality=checkin.sleep_quality,
+        pain_level=checkin.pain_level,
+        stress_level=checkin.stress_level,
+        checkin_done=True,
+        approval_pending=not user_is_admin,
+        checkin_at=now,
+        week_plan_id=week_plan.id,
+        day_plan_id=day_plan.id,
+        day_of_week=day_plan.day_of_week,
+        recheckin_count=(getattr(log, "recheckin_count", 0) or 0) + (1 if is_recheck else 0),
+        last_checkin_at=now,
+    )
+
+    await callback.message.answer(T.checkin.waiting_trainer, reply_markup=kb_main_menu(checkin_done=True))
+
+    if not user_is_admin:
+        card = T.checkin.admin_card_manual.format(
+            name=user.full_name,
+            wellbeing=_WELLBEING_LABELS.get(checkin.wellbeing, "?"),
+            sleep=_SLEEP_LABELS.get(checkin.sleep_quality, "?"),
+            pain=_PAIN_LABELS.get(checkin.pain_level, "?"),
+            stress=_STRESS_LABELS.get(checkin.stress_level, "?"),
+        )
+        for admin_id in settings.admin_ids:
+            try:
+                await callback.bot.send_message(
+                    chat_id=admin_id,
+                    text=card,
+                    parse_mode="HTML",
+                    reply_markup=kb_checkin_approve(user_id),
+                )
+            except Exception:
+                logger.warning("Could not send manual card to admin %s", admin_id)
+
+
+# ═════════════════════════��════════════════════════════════════════════════════
+# OLD system path (28-day, Workout table)
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def _finish_checkin_old(
+    callback: CallbackQuery,
+    checkin: CheckinData,
+    session: AsyncSession,
+    user,
+) -> None:
+    user_id = callback.from_user.id
+    log_svc = SessionLogService(session)
+    wk_svc = WorkoutService(session)
+    user_svc = UserService(session)
+
+    calendar_day = await user_svc.current_calendar_day(user) or 1
+    template_day = await user_svc.current_template_day(user) or 1
+    day_type = await wk_svc.get_day_type(user.level, template_day) or "run"
+
+    # Вчерашний лог для "возврат после боли"
+    yesterday_log = await log_svc.get_yesterday(user_id)
+    yesterday_data = RecentDayData(
+        pain_level=yesterday_log.pain_level if yesterday_log and yesterday_log.pain_level else 1
+    )
+
+    decision = decide_workout_version(checkin, day_type, yesterday_data)
+    workout = await wk_svc.get(
+        user.level, template_day, decision.version,
+        strength_format=user.strength_format if day_type == "strength" else None,
+    )
+
+    now = datetime.now(timezone.utc)
+    user_is_admin = user_id in settings.admin_ids
+
+    log, created = await log_svc.get_or_create_today(user_id, template_day)
+    is_recheck = not created
+    await log_svc.update(
+        log,
+        wellbeing=checkin.wellbeing,
+        sleep_quality=checkin.sleep_quality,
+        pain_level=checkin.pain_level,
         stress_level=checkin.stress_level,
         assigned_workout_id=workout.id if workout else None,
         assigned_version=decision.version,
-        red_flag=decision.red_flag,
-        fatigue_reduction=decision.fatigue_reduction,
         checkin_done=True,
         approval_pending=not user_is_admin,
         checkin_at=now,
     )
 
     logger.info(
-        "Checkin user=%s calendar_day=%s template_day=%s wellbeing=%s sleep=%s pain=%s stress=%s → version=%s (%s)",
+        "Checkin (old) user=%s calendar_day=%s template_day=%s "
+        "wellbeing=%s sleep=%s pain=%s stress=%s → version=%s",
         user_id, calendar_day, template_day, checkin.wellbeing, checkin.sleep_quality,
         checkin.pain_level, checkin.stress_level, decision.version,
-        "admin-direct" if user_is_admin else "pending approval",
     )
 
-    # Send interpretation to user
-    interpretation = get_interpretation(
-        version=decision.version,
-        checkin_wellbeing=checkin.wellbeing,
-        red_flag=decision.red_flag,
-        fatigue_reduction=decision.fatigue_reduction,
-        pain_level=checkin.pain_level,
-    )
-    await callback.message.answer(interpretation)
+    # Интерпретация
+    try:
+        interpretation = get_interpretation(
+            version=decision.version,
+            checkin_wellbeing=checkin.wellbeing,
+            red_flag=False,
+            fatigue_reduction=False,
+            pain_level=checkin.pain_level,
+        )
+        await callback.message.answer(interpretation)
+    except Exception:
+        pass
 
     if user_is_admin:
-        # Send workout directly — no approval card needed
         if decision.version == "rest" or workout is None:
             await callback.message.answer(T.checkin.rest_day, reply_markup=kb_main_menu(checkin_done=True))
         else:
@@ -387,10 +726,10 @@ async def _finish_checkin(
 
     await callback.message.answer(T.checkin.waiting_trainer, reply_markup=kb_main_menu(checkin_done=True))
 
-    # Build approval card for non-admin athletes
+    # Карточка для тренера (старый формат)
     day_type_label = _DAY_TYPE_LABELS.get(day_type, day_type)
-    history_line = _build_history_line(recent_logs) if decision.fatigue_reduction else ""
     recheck_suffix = T.checkin.recheck_label if is_recheck else ""
+    # Получаем последние логи для истории (упрощённо — не используем fatigue)
     card = T.checkin.admin_card.format(
         name=user.full_name + recheck_suffix,
         calendar_day=calendar_day,
@@ -402,7 +741,7 @@ async def _finish_checkin(
         stress=_STRESS_LABELS.get(checkin.stress_level, "?"),
         version=_VERSION_LABELS.get(decision.version, decision.version),
         reason=decision.reason,
-    ) + (f"\n{history_line}" if history_line else "")
+    )
     for admin_id in settings.admin_ids:
         try:
             await callback.bot.send_message(
@@ -413,3 +752,52 @@ async def _finish_checkin(
             )
         except Exception:
             logger.warning("Could not send approval card to admin %s", admin_id)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Template lookup helper
+# ════════════════════════════════════════════════��═════════════════════════════
+
+async def _get_workout_template(
+    session: AsyncSession,
+    level: int,
+    period: str | None,
+    day_type: str,
+    run_subtype: str | None,
+    version: str,
+    strength_format: str | None = None,
+):
+    """
+    Ищет WorkoutTemplate для данных параметров.
+    Приоритет: period-специфичный → универсальный (period=NULL).
+    """
+    from database.models import WorkoutTemplate
+
+    base_filters = [
+        WorkoutTemplate.level == level,
+        WorkoutTemplate.day_type == day_type,
+        WorkoutTemplate.version == version,
+    ]
+    if run_subtype:
+        base_filters.append(WorkoutTemplate.run_subtype == run_subtype)
+    if strength_format and day_type == "strength":
+        base_filters.append(WorkoutTemplate.strength_format == strength_format)
+
+    # Попытка 1: period-specific
+    if period:
+        result = await session.execute(
+            select(WorkoutTemplate)
+            .where(*base_filters, WorkoutTemplate.period == period)
+            .limit(1)
+        )
+        template = result.scalar_one_or_none()
+        if template:
+            return template
+
+    # Попытка 2: универсальный (period = NULL)
+    result = await session.execute(
+        select(WorkoutTemplate)
+        .where(*base_filters, WorkoutTemplate.period.is_(None))
+        .limit(1)
+    )
+    return result.scalar_one_or_none()

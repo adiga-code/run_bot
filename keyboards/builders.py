@@ -222,6 +222,35 @@ def kb_location() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def kb_continuous_run_test() -> InlineKeyboardMarkup:
+    """Вопрос о том, может ли пользователь бежать 20+ мин непрерывно (L1)."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text=T.btn.crt_yes,    callback_data="onb:crt:yes")
+    builder.button(text=T.btn.crt_no,     callback_data="onb:crt:no")
+    builder.button(text=T.btn.crt_unsure, callback_data="onb:crt:unsure")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+_WEEKDAYS = [
+    (1, "Пн"), (2, "Вт"), (3, "Ср"), (4, "Чт"), (5, "Пт"), (6, "Сб"), (7, "Вс"),
+]
+
+
+def kb_available_days(selected: list[int]) -> InlineKeyboardMarkup:
+    """Мультиселект доступных дней недели (1=Пн..7=Вс)."""
+    builder = InlineKeyboardBuilder()
+    for num, label in _WEEKDAYS:
+        prefix = "✅ " if num in selected else ""
+        builder.button(
+            text=f"{prefix}{label}",
+            callback_data=f"onb:avday:{num}",
+        )
+    builder.button(text=T.btn.done_arrow, callback_data="onb:avday:done")
+    builder.adjust(4, 3, 1)
+    return builder.as_markup()
+
+
 def kb_timezone() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for tz in TIMEZONES:
@@ -301,9 +330,19 @@ def kb_pain_increases_checkin() -> InlineKeyboardMarkup:
 # ── Workout completion ────────────────────────────────────────────────────────
 
 def kb_completion() -> InlineKeyboardMarkup:
+    """Кнопки завершения тренировки (СТАРАЯ система: done/partial/skipped)."""
     builder = InlineKeyboardBuilder()
     builder.button(text=T.btn.completion_done,    callback_data="wk:status:done")
     builder.button(text=T.btn.completion_partial, callback_data="wk:status:partial")
+    builder.button(text=T.btn.completion_skipped, callback_data="wk:status:skipped")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_completion_v2() -> InlineKeyboardMarkup:
+    """Кнопки завершения тренировки (НОВАЯ система: done/skipped, без partial)."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text=T.btn.completion_done,    callback_data="wk:status:done")
     builder.button(text=T.btn.completion_skipped, callback_data="wk:status:skipped")
     builder.adjust(1)
     return builder.as_markup()
@@ -484,7 +523,12 @@ def kb_admin_report_actions(user_id: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def kb_admin_manage(user_id: int, extended: bool = False) -> InlineKeyboardMarkup:
+def kb_admin_manage(
+    user_id: int,
+    extended: bool = False,
+    has_red_flag: bool = False,
+    current_period: str | None = None,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=T.btn.adm_change_mode,   callback_data=f"adm:mode:{user_id}")
     builder.button(text=T.btn.adm_jump_day,      callback_data=f"adm:jump:{user_id}")
@@ -496,6 +540,8 @@ def kb_admin_manage(user_id: int, extended: bool = False) -> InlineKeyboardMarku
         builder.button(text=T.btn.adm_extend_week5, callback_data=f"adm:extend:{user_id}")
     else:
         builder.button(text=T.btn.adm_week5_active, callback_data=f"adm:extend:off:{user_id}")
+    if has_red_flag:
+        builder.button(text="🚩 Снять red flag", callback_data=f"adm:red_flag:remove:{user_id}")
     builder.button(text="🗑 Удалить пользователя", callback_data=f"adm:delete:{user_id}")
     builder.button(text=T.btn.back, callback_data=f"adm:report:view:{user_id}")
     builder.adjust(1)
@@ -540,7 +586,18 @@ def kb_checkin_approve(user_id: int) -> InlineKeyboardMarkup:
     builder.button(text=T.btn.adm_ci_recovery, callback_data=f"adm:ca:{user_id}:recovery")
     builder.button(text=T.btn.adm_ci_rest,     callback_data=f"adm:ca:{user_id}:rest")
     builder.button(text=T.btn.adm_ci_preview,  callback_data=f"adm:preview:{user_id}")
-    builder.adjust(2, 2, 1)
+    builder.button(text="✏️ Свой текст",       callback_data=f"adm:override:text:{user_id}")
+    builder.adjust(2, 2, 2)
+    return builder.as_markup()
+
+
+def kb_coach_override_minutes(user_id: int) -> InlineKeyboardMarkup:
+    """Кнопки изменения количества минут при override тренировки."""
+    builder = InlineKeyboardBuilder()
+    for mins in [20, 30, 40, 45, 60, 75, 90]:
+        builder.button(text=f"{mins} мин", callback_data=f"adm:override:mins:{user_id}:{mins}")
+    builder.button(text="✏️ Другое", callback_data=f"adm:override:mins_custom:{user_id}")
+    builder.adjust(4, 3, 1)
     return builder.as_markup()
 
 

@@ -82,8 +82,8 @@ def test_no_fatigue_empty_history():
 
 
 def test_fatigue_bad_wellbeing_days():
-    """wellbeing ≤ 2 counts as tough."""
-    logs = [log(wellbeing=1), log(wellbeing=2), log()]
+    """wellbeing==1 counts as tough; 2 such days → fatigue."""
+    logs = [log(wellbeing=1), log(wellbeing=1), log()]
     assert detect_cumulative_fatigue(logs) is True
 
 
