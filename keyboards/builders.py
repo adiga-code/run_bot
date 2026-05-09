@@ -431,20 +431,35 @@ def kb_admin_menu() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def kb_admin_referral_list(links: list) -> InlineKeyboardMarkup:
+def kb_admin_referrals(links: list) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for link in links:
-        builder.button(text=f"📎 {link.name}", callback_data=f"adm:ref:view:{link.code}")
-    builder.button(text=T.btn.adm_ref_create, callback_data="adm:ref:create")
-    builder.button(text=T.btn.back,           callback_data="adm:ref:back")
+        icon = "✅" if link.is_active else "❌"
+        builder.button(text=f"{icon} {link.name}", callback_data=f"adm:ref:view:{link.code}")
+    builder.button(text=T.btn.adm_ref_new, callback_data="adm:ref:new")
+    builder.button(text=T.btn.back, callback_data="adm:menu:back")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_admin_referral_list(links: list) -> InlineKeyboardMarkup:
+    return kb_admin_referrals(links)
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_admin_ref_detail(code: str, is_active: bool) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    toggle_text = T.btn.adm_ref_toggle_on if is_active else T.btn.adm_ref_toggle_off
+    builder.button(text=toggle_text,         callback_data=f"adm:ref:toggle:{code}")
+    builder.button(text=T.btn.adm_ref_users, callback_data=f"adm:ref:users:{code}")
+    builder.button(text=T.btn.back,          callback_data="adm:menu:referrals")
     builder.adjust(1)
     return builder.as_markup()
 
 
 def kb_admin_referral_detail(code: str) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(text=T.btn.adm_ref_delete,    callback_data=f"adm:ref:del:{code}")
-    builder.button(text=T.btn.adm_ref_back_list, callback_data="adm:menu:referrals")
+    return kb_admin_ref_detail(code, is_active=True)
     builder.adjust(1)
     return builder.as_markup()
 
@@ -471,11 +486,12 @@ def kb_admin_report_actions(user_id: int) -> InlineKeyboardMarkup:
 
 def kb_admin_manage(user_id: int, extended: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=T.btn.adm_change_mode,  callback_data=f"adm:mode:{user_id}")
-    builder.button(text=T.btn.adm_jump_day,     callback_data=f"adm:jump:{user_id}")
-    builder.button(text=T.btn.adm_change_level, callback_data=f"adm:pick:{user_id}")
-    builder.button(text=T.btn.adm_mark_workout, callback_data=f"adm:markday:{user_id}")
-    builder.button(text=T.btn.adm_send_msg,     callback_data=f"adm:msg:{user_id}")
+    builder.button(text=T.btn.adm_change_mode,   callback_data=f"adm:mode:{user_id}")
+    builder.button(text=T.btn.adm_jump_day,      callback_data=f"adm:jump:{user_id}")
+    builder.button(text=T.btn.adm_change_level,  callback_data=f"adm:pick:{user_id}")
+    builder.button(text=T.btn.adm_mark_workout,  callback_data=f"adm:markday:{user_id}")
+    builder.button(text=T.btn.adm_send_msg,      callback_data=f"adm:msg:{user_id}")
+    builder.button(text=T.btn.adm_send_checkin,  callback_data=f"adm:send_checkin:{user_id}")
     if not extended:
         builder.button(text=T.btn.adm_extend_week5, callback_data=f"adm:extend:{user_id}")
     else:
@@ -523,7 +539,8 @@ def kb_checkin_approve(user_id: int) -> InlineKeyboardMarkup:
     builder.button(text=T.btn.adm_ci_light,    callback_data=f"adm:ca:{user_id}:light")
     builder.button(text=T.btn.adm_ci_recovery, callback_data=f"adm:ca:{user_id}:recovery")
     builder.button(text=T.btn.adm_ci_rest,     callback_data=f"adm:ca:{user_id}:rest")
-    builder.adjust(2)
+    builder.button(text=T.btn.adm_ci_preview,  callback_data=f"adm:preview:{user_id}")
+    builder.adjust(2, 2, 1)
     return builder.as_markup()
 
 

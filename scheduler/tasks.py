@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 async def _reactivate_extended_users(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> None:
     """
-    Reactivates users with extended_week5=True who were marked 'completed' at day 35
-    but still have days remaining in the extended 6-week program (up to day 42).
+    Reactivates users with extended_week5=True who were marked 'completed' early
+    but still have days remaining in the extended program.
     Runs once on bot startup and then nightly as part of _create_daily_logs.
     """
     from sqlalchemy import select as sa_select
@@ -37,22 +37,21 @@ async def _reactivate_extended_users(bot: Bot, session_maker: async_sessionmaker
         completed_extended = result.scalars().all()
         for user in completed_extended:
             raw_day = (date.today() - user.program_start_date).days + 1
-            if raw_day <= 42:
+            max_day = user_svc._max_day(user)
+            if raw_day <= max_day:
                 await user_svc.update(user, status="active")
-                # Create today's session log so the user gets their check-in today
                 day = await user_svc.current_program_day(user)
                 if day is not None:
                     await log_svc.get_or_create_today(user.telegram_id, day)
                 logger.info(
-                    "Auto-reactivated user %s for week 6 (day %d)",
-                    user.telegram_id, raw_day,
+                    "Auto-reactivated user %s (day %d / %d)",
+                    user.telegram_id, raw_day, max_day,
                 )
                 try:
                     await bot.send_message(
                         chat_id=user.telegram_id,
                         text=(
                             "🏃 Твоя программа продолжается!\n\n"
-                            "6-я неделя начинается — ты справился, и мы идём дальше. "
                             "Продолжай в том же темпе 💪"
                         ),
                         reply_markup=kb_main_menu(),

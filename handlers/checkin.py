@@ -198,7 +198,7 @@ async def cb_today(callback: CallbackQuery, state: FSMContext, session: AsyncSes
                 tips = get_tip_lines(user.level, log.day_index)  # template day for tips
                 tips_block = f"\n\n{tips}" if tips else ""
                 await callback.message.answer(
-                    T.checkin.workout_header.format(calendar_day=calendar_day, title=workout.title) + tips_block + f"\n\n{workout_text}",
+                    T.checkin.workout_header.format(calendar_day=calendar_day, max_day=user_svc._max_day(user), title=workout.title) + tips_block + f"\n\n{workout_text}",
                     parse_mode="HTML",
                     reply_markup=(
                         kb_main_menu() if already_marked
@@ -381,6 +381,7 @@ async def _finish_checkin(
                 callback.bot, user_id, template_day,
                 workout, day_type, decision.version, user.strength_format, user.level,
                 calendar_day=calendar_day,
+                max_day=user_svc._max_day(user),
             )
         return
 
@@ -393,6 +394,7 @@ async def _finish_checkin(
     card = T.checkin.admin_card.format(
         name=user.full_name + recheck_suffix,
         calendar_day=calendar_day,
+        max_day=user_svc._max_day(user),
         day_type=day_type_label,
         wellbeing=_WELLBEING_LABELS.get(checkin.wellbeing, "?"),
         sleep=_SLEEP_LABELS.get(checkin.sleep_quality, "?"),
