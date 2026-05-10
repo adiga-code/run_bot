@@ -15,167 +15,160 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _add_column_if_not_exists(table: str, column: str, ddl: str) -> None:
+    op.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {ddl}")
+
+
 def upgrade() -> None:
     # ──────────────────────────────────────────────────────────────────────────
     # workout_templates (новая таблица)
     # ──────────────────────────────────────────────────────────────────────────
-    op.create_table(
-        "workout_templates",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("level", sa.Integer(), nullable=False),
-        sa.Column("day_type", sa.String(20), nullable=False),
-        sa.Column("run_subtype", sa.String(30), nullable=True),
-        sa.Column("version", sa.String(20), nullable=False),
-        sa.Column("intensity_kind", sa.String(30), nullable=True),
-        sa.Column("period", sa.String(30), nullable=True),
-        sa.Column("strength_format", sa.String(10), nullable=True),
-        sa.Column("title", sa.String(200), nullable=False),
-        sa.Column("short_title", sa.String(100), nullable=True),
-        sa.Column("text", sa.Text(), nullable=False),
-        sa.Column("micro_learning", sa.Text(), nullable=True),
-        sa.Column("video_url", sa.String(500), nullable=True),
-        sa.Column("media_id", sa.String(200), nullable=True),
-        sa.PrimaryKeyConstraint("id"),
-    )
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS workout_templates (
+            id SERIAL NOT NULL,
+            level INTEGER NOT NULL,
+            day_type VARCHAR(20) NOT NULL,
+            run_subtype VARCHAR(30),
+            version VARCHAR(20) NOT NULL,
+            intensity_kind VARCHAR(30),
+            period VARCHAR(30),
+            strength_format VARCHAR(10),
+            title VARCHAR(200) NOT NULL,
+            short_title VARCHAR(100),
+            text TEXT NOT NULL,
+            micro_learning TEXT,
+            video_url VARCHAR(500),
+            media_id VARCHAR(200),
+            PRIMARY KEY (id)
+        )
+    """)
 
     # ──────────────────────────────────────────────────────────────────────────
     # week_plans (новая таблица)
     # ──────────────────────────────────────────────────────────────────────────
-    op.create_table(
-        "week_plans",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("user_id", sa.BigInteger(), nullable=False),
-        sa.Column("week_number", sa.Integer(), nullable=False),
-        sa.Column("cycle_number", sa.Integer(), nullable=False, server_default="1"),
-        sa.Column("period", sa.String(30), nullable=False),
-        sa.Column("period_week_number", sa.Integer(), nullable=False, server_default="1"),
-        sa.Column("start_date", sa.Date(), nullable=False),
-        sa.Column("end_date", sa.Date(), nullable=False),
-        sa.Column("weekly_target_minutes", sa.Integer(), nullable=False),
-        sa.Column("is_recovery_week", sa.Boolean(), nullable=False, server_default="false"),
-        sa.Column("is_rollback_week", sa.Boolean(), nullable=False, server_default="false"),
-        sa.Column("actual_running_minutes", sa.Integer(), nullable=True),
-        sa.Column("completion_rate", sa.Float(), nullable=True),
-        sa.Column("keys_completed", sa.Boolean(), nullable=True),
-        sa.Column("growth_eligible", sa.Boolean(), nullable=True),
-        sa.Column("no_growth_reason", sa.String(100), nullable=True),
-        sa.Column("closed_at", sa.DateTime(timezone=True), nullable=True),
-        sa.ForeignKeyConstraint(["user_id"], ["users.telegram_id"]),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_week_plans_user_start", "week_plans", ["user_id", "start_date"])
-    op.create_index("ix_week_plans_user_closed", "week_plans", ["user_id", "closed_at"])
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS week_plans (
+            id SERIAL NOT NULL,
+            user_id BIGINT NOT NULL,
+            week_number INTEGER NOT NULL,
+            cycle_number INTEGER NOT NULL DEFAULT 1,
+            period VARCHAR(30) NOT NULL,
+            period_week_number INTEGER NOT NULL DEFAULT 1,
+            start_date DATE NOT NULL,
+            end_date DATE NOT NULL,
+            weekly_target_minutes INTEGER NOT NULL,
+            is_recovery_week BOOLEAN NOT NULL DEFAULT false,
+            is_rollback_week BOOLEAN NOT NULL DEFAULT false,
+            actual_running_minutes INTEGER,
+            completion_rate FLOAT,
+            keys_completed BOOLEAN,
+            growth_eligible BOOLEAN,
+            no_growth_reason VARCHAR(100),
+            closed_at TIMESTAMPTZ,
+            PRIMARY KEY (id),
+            FOREIGN KEY (user_id) REFERENCES users(telegram_id)
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_week_plans_user_start ON week_plans (user_id, start_date)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_week_plans_user_closed ON week_plans (user_id, closed_at)")
 
     # ──────────────────────────────────────────────────────────────────────────
     # day_plans (новая таблица)
     # ──────────────────────────────────────────────────────────────────────────
-    op.create_table(
-        "day_plans",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("week_plan_id", sa.Integer(), nullable=False),
-        sa.Column("day_of_week", sa.Integer(), nullable=False),
-        sa.Column("day_type", sa.String(20), nullable=False),
-        sa.Column("run_subtype", sa.String(30), nullable=True),
-        sa.Column("planned_minutes", sa.Integer(), nullable=False),
-        sa.Column("intensity", sa.String(30), nullable=True),
-        sa.Column("is_key", sa.Boolean(), nullable=False, server_default="false"),
-        sa.Column("is_key_completed", sa.Boolean(), nullable=True),
-        sa.Column("session_log_id", sa.Integer(), nullable=True),
-        sa.ForeignKeyConstraint(["week_plan_id"], ["week_plans.id"]),
-        sa.ForeignKeyConstraint(["session_log_id"], ["session_logs.id"]),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("week_plan_id", "day_of_week", name="uq_day_plan_week_day"),
-    )
-    op.create_index("ix_day_plans_week_key", "day_plans", ["week_plan_id", "is_key"])
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS day_plans (
+            id SERIAL NOT NULL,
+            week_plan_id INTEGER NOT NULL,
+            day_of_week INTEGER NOT NULL,
+            day_type VARCHAR(20) NOT NULL,
+            run_subtype VARCHAR(30),
+            planned_minutes INTEGER NOT NULL,
+            intensity VARCHAR(30),
+            is_key BOOLEAN NOT NULL DEFAULT false,
+            is_key_completed BOOLEAN,
+            session_log_id INTEGER,
+            PRIMARY KEY (id),
+            FOREIGN KEY (week_plan_id) REFERENCES week_plans(id),
+            FOREIGN KEY (session_log_id) REFERENCES session_logs(id),
+            UNIQUE (week_plan_id, day_of_week)
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_day_plans_week_key ON day_plans (week_plan_id, is_key)")
 
     # ──────────────────────────────────────────────────────────────────────────
     # users — новые поля
     # ──────────────────────────────────────────────────────────────────────────
-    # Онбординг v2
-    op.add_column("users", sa.Column("q_continuous_run_test", sa.String(10), nullable=True))
-    # Доступные дни и объём
-    op.add_column("users", sa.Column("available_weekdays", sa.String(20), nullable=True))
-    op.add_column("users", sa.Column("weekly_target_minutes", sa.Integer(), nullable=True))
-    op.add_column("users", sa.Column("peak_volume_minutes", sa.Integer(), nullable=True))
-    op.add_column("users", sa.Column("last_successful_volume", sa.Integer(), nullable=True))
-    # Период и цикл
-    op.add_column("users", sa.Column("current_period", sa.String(30), nullable=True))
-    op.add_column("users", sa.Column("period_start_date", sa.Date(), nullable=True))
-    op.add_column("users", sa.Column("period_week_number", sa.Integer(), nullable=False, server_default="1"))
-    op.add_column("users", sa.Column("cycle_number", sa.Integer(), nullable=False, server_default="1"))
-    op.add_column("users", sa.Column("cycle_start_date", sa.Date(), nullable=True))
-    op.add_column("users", sa.Column("program_week_number", sa.Integer(), nullable=False, server_default="1"))
-    # Счётчики
-    op.add_column("users", sa.Column("growth_streak", sa.Integer(), nullable=False, server_default="0"))
-    op.add_column("users", sa.Column("weeks_since_recovery", sa.Integer(), nullable=False, server_default="0"))
-    # Red flag
-    op.add_column("users", sa.Column("red_flag_active", sa.Boolean(), nullable=False, server_default="false"))
-    op.add_column("users", sa.Column("red_flag_reason", sa.String(100), nullable=True))
-    op.add_column("users", sa.Column("red_flag_at", sa.Date(), nullable=True))
-    # Точка входа
-    op.add_column("users", sa.Column("has_goal_race", sa.Boolean(), nullable=False, server_default="false"))
-    op.add_column("users", sa.Column("entry_point", sa.String(20), nullable=True))
-    # Return-mode
-    op.add_column("users", sa.Column("injury_return_active", sa.Boolean(), nullable=False, server_default="false"))
-    op.add_column("users", sa.Column("target_level", sa.Integer(), nullable=True))
-    op.add_column("users", sa.Column("return_mode_started_at", sa.Date(), nullable=True))
-    # L3 recovery period
-    op.add_column("users", sa.Column("in_macrocycle_recovery", sa.Boolean(), nullable=False, server_default="false"))
-    op.add_column("users", sa.Column("macrocycle_recovery_week", sa.Integer(), nullable=False, server_default="0"))
-    op.add_column("users", sa.Column("macrocycle_peak_volume", sa.Integer(), nullable=True))
-    # L1 long stage
-    op.add_column("users", sa.Column("l1_long_independent", sa.Boolean(), nullable=False, server_default="false"))
-    op.add_column("users", sa.Column("l1_no_pain_streak_weeks", sa.Integer(), nullable=False, server_default="0"))
-    op.add_column("users", sa.Column("l1_easy_reached_40min", sa.Boolean(), nullable=False, server_default="false"))
+    _add_column_if_not_exists("users", "q_continuous_run_test", "VARCHAR(10)")
+    _add_column_if_not_exists("users", "available_weekdays", "VARCHAR(20)")
+    _add_column_if_not_exists("users", "weekly_target_minutes", "INTEGER")
+    _add_column_if_not_exists("users", "peak_volume_minutes", "INTEGER")
+    _add_column_if_not_exists("users", "last_successful_volume", "INTEGER")
+    _add_column_if_not_exists("users", "current_period", "VARCHAR(30)")
+    _add_column_if_not_exists("users", "period_start_date", "DATE")
+    _add_column_if_not_exists("users", "period_week_number", "INTEGER NOT NULL DEFAULT 1")
+    _add_column_if_not_exists("users", "cycle_number", "INTEGER NOT NULL DEFAULT 1")
+    _add_column_if_not_exists("users", "cycle_start_date", "DATE")
+    _add_column_if_not_exists("users", "program_week_number", "INTEGER NOT NULL DEFAULT 1")
+    _add_column_if_not_exists("users", "growth_streak", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_not_exists("users", "weeks_since_recovery", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_not_exists("users", "red_flag_active", "BOOLEAN NOT NULL DEFAULT false")
+    _add_column_if_not_exists("users", "red_flag_reason", "VARCHAR(100)")
+    _add_column_if_not_exists("users", "red_flag_at", "DATE")
+    _add_column_if_not_exists("users", "has_goal_race", "BOOLEAN NOT NULL DEFAULT false")
+    _add_column_if_not_exists("users", "entry_point", "VARCHAR(20)")
+    _add_column_if_not_exists("users", "injury_return_active", "BOOLEAN NOT NULL DEFAULT false")
+    _add_column_if_not_exists("users", "target_level", "INTEGER")
+    _add_column_if_not_exists("users", "return_mode_started_at", "DATE")
+    _add_column_if_not_exists("users", "in_macrocycle_recovery", "BOOLEAN NOT NULL DEFAULT false")
+    _add_column_if_not_exists("users", "macrocycle_recovery_week", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_not_exists("users", "macrocycle_peak_volume", "INTEGER")
+    _add_column_if_not_exists("users", "l1_long_independent", "BOOLEAN NOT NULL DEFAULT false")
+    _add_column_if_not_exists("users", "l1_no_pain_streak_weeks", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_not_exists("users", "l1_easy_reached_40min", "BOOLEAN NOT NULL DEFAULT false")
 
     # ──────────────────────────────────────────────────────────────────────────
     # session_logs — новые поля
     # ──────────────────────────────────────────────────────────────────────────
-    # Связь с новой моделью
-    op.add_column("session_logs", sa.Column("week_plan_id", sa.Integer(), nullable=True))
-    op.add_column("session_logs", sa.Column("day_plan_id", sa.Integer(), nullable=True))
-    op.add_column("session_logs", sa.Column("day_of_week", sa.Integer(), nullable=True))
-    op.add_column("session_logs", sa.Column("planned_minutes", sa.Integer(), nullable=True))
-    # Coach override
-    op.add_column("session_logs", sa.Column("coach_override", sa.Boolean(), nullable=False, server_default="false"))
-    op.add_column("session_logs", sa.Column("override_version", sa.String(20), nullable=True))
-    op.add_column("session_logs", sa.Column("override_workout_template_id", sa.Integer(), nullable=True))
-    op.add_column("session_logs", sa.Column("override_text", sa.Text(), nullable=True))
-    op.add_column("session_logs", sa.Column("override_minutes", sa.Integer(), nullable=True))
-    op.add_column("session_logs", sa.Column("approved_by_admin_id", sa.BigInteger(), nullable=True))
-    op.add_column("session_logs", sa.Column("approved_at", sa.DateTime(timezone=True), nullable=True))
-    # Absence-flow
-    op.add_column("session_logs", sa.Column("absence_reason", sa.String(30), nullable=True))
-    op.add_column("session_logs", sa.Column("absence_reason_text", sa.Text(), nullable=True))
-    op.add_column("session_logs", sa.Column("absence_responded_at", sa.DateTime(timezone=True), nullable=True))
-    # Re-checkin
-    op.add_column("session_logs", sa.Column("recheckin_count", sa.Integer(), nullable=False, server_default="0"))
-    op.add_column("session_logs", sa.Column("last_checkin_at", sa.DateTime(timezone=True), nullable=True))
+    _add_column_if_not_exists("session_logs", "week_plan_id", "INTEGER")
+    _add_column_if_not_exists("session_logs", "day_plan_id", "INTEGER")
+    _add_column_if_not_exists("session_logs", "day_of_week", "INTEGER")
+    _add_column_if_not_exists("session_logs", "planned_minutes", "INTEGER")
+    _add_column_if_not_exists("session_logs", "coach_override", "BOOLEAN NOT NULL DEFAULT false")
+    _add_column_if_not_exists("session_logs", "override_version", "VARCHAR(20)")
+    _add_column_if_not_exists("session_logs", "override_workout_template_id", "INTEGER")
+    _add_column_if_not_exists("session_logs", "override_text", "TEXT")
+    _add_column_if_not_exists("session_logs", "override_minutes", "INTEGER")
+    _add_column_if_not_exists("session_logs", "approved_by_admin_id", "BIGINT")
+    _add_column_if_not_exists("session_logs", "approved_at", "TIMESTAMPTZ")
+    _add_column_if_not_exists("session_logs", "absence_reason", "VARCHAR(30)")
+    _add_column_if_not_exists("session_logs", "absence_reason_text", "TEXT")
+    _add_column_if_not_exists("session_logs", "absence_responded_at", "TIMESTAMPTZ")
+    _add_column_if_not_exists("session_logs", "recheckin_count", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_not_exists("session_logs", "last_checkin_at", "TIMESTAMPTZ")
 
-    # FK constraints для session_logs (добавляем только если нужно и поддерживается СУБД)
-    # Используем batch_alter_table для совместимости с SQLite
+    # FK constraints — пропускаем если уже существуют
     try:
         op.create_foreign_key(
-            "fk_session_logs_week_plan",
-            "session_logs", "week_plans",
-            ["week_plan_id"], ["id"],
+            "fk_session_logs_week_plan", "session_logs", "week_plans", ["week_plan_id"], ["id"],
         )
+    except Exception:
+        pass
+    try:
         op.create_foreign_key(
-            "fk_session_logs_day_plan",
-            "session_logs", "day_plans",
-            ["day_plan_id"], ["id"],
+            "fk_session_logs_day_plan", "session_logs", "day_plans", ["day_plan_id"], ["id"],
         )
+    except Exception:
+        pass
+    try:
         op.create_foreign_key(
-            "fk_session_logs_override_template",
-            "session_logs", "workout_templates",
+            "fk_session_logs_override_template", "session_logs", "workout_templates",
             ["override_workout_template_id"], ["id"],
         )
     except Exception:
-        pass  # SQLite не поддерживает ADD CONSTRAINT — не критично
+        pass
 
 
 def downgrade() -> None:
-    # ── session_logs — удалить новые поля ────────────────────────────────────
     for col in [
         "week_plan_id", "day_plan_id", "day_of_week", "planned_minutes",
         "coach_override", "override_version", "override_workout_template_id",
@@ -185,7 +178,6 @@ def downgrade() -> None:
     ]:
         op.drop_column("session_logs", col)
 
-    # ── users — удалить новые поля ────────────────────────────────────────────
     for col in [
         "q_continuous_run_test", "available_weekdays", "weekly_target_minutes",
         "peak_volume_minutes", "last_successful_volume", "current_period",
@@ -198,7 +190,6 @@ def downgrade() -> None:
     ]:
         op.drop_column("users", col)
 
-    # ── удалить таблицы ───────────────────────────────────────────────────────
     op.drop_index("ix_day_plans_week_key", "day_plans")
     op.drop_table("day_plans")
     op.drop_index("ix_week_plans_user_closed", "week_plans")
