@@ -357,7 +357,7 @@ async def cb_admin_manage(callback: CallbackQuery, session: AsyncSession) -> Non
 
     current_day = await user_svc.current_calendar_day(user) or "?"
     level_name = LEVEL_NAMES.get(user.level, "?")
-    max_day = 42 if getattr(user, "extended_week5", False) else 28
+    max_day = 56 if getattr(user, "extended_week5", False) else 28
     week5_status = T.admin.week5_label if getattr(user, "extended_week5", False) else ""
     goal_line = T.onb.goal_labels.get(user.q_goal or "", "—")
     if user.q_goal == "distance":
@@ -403,12 +403,12 @@ async def cb_admin_extend_week5(callback: CallbackQuery, session: AsyncSession) 
 
     await user_svc.update(user, extended_week5=activate)
 
-    # If enabling extension for a completed user still within 42 days → reactivate immediately
+    # If enabling extension for a completed user still within 56 days → reactivate immediately
     if activate and user.status == "completed" and user.program_start_date:
         from datetime import date as _date
         from services.session_log_service import SessionLogService as _LogSvc
         raw_day = (_date.today() - user.program_start_date).days + 1
-        if raw_day <= 42:
+        if raw_day <= 56:
             await user_svc.update(user, status="active")
             # Create today's log so user gets check-in right away
             log_svc = _LogSvc(session)
@@ -681,7 +681,7 @@ async def admin_jump_day_input(message: Message, state: FSMContext, session: Asy
 
     try:
         target_day = int(message.text.strip())
-        assert 1 <= target_day <= 42
+        assert 1 <= target_day <= 56
     except Exception:
         await message.answer(T.admin.jump_invalid)
         return
