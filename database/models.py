@@ -73,6 +73,10 @@ class User(Base):
     q_strength: Mapped[str | None] = mapped_column(String(20), nullable=True)     # legacy
     # NEW — онбординг v2
     q_continuous_run_test: Mapped[str | None] = mapped_column(String(10), nullable=True)  # yes/no/unsure
+    # Блок гаджеты (не влияет на decision-логику, только сбор данных)
+    q_gadget: Mapped[str | None] = mapped_column(String(10), nullable=True)        # yes / no
+    q_gadget_types: Mapped[str | None] = mapped_column(String(200), nullable=True)  # whoop,garmin,oura,apple_watch,polar,fitbit,other
+    q_gadget_sharing: Mapped[str | None] = mapped_column(String(10), nullable=True) # yes / no / later
 
     # ── NEW: доступные дни и объём ────────────────────────────────────────────
     available_weekdays: Mapped[str | None] = mapped_column(String(20), nullable=True)   # "1,3,5"
