@@ -108,7 +108,12 @@ class WeekPlanService:
         """
         Создаёт первый WeekPlan сразу после одобрения тренером.
         start_date = ближайший понедельник от anchor_date (по умолч. сегодня).
+        Если активный план уже существует — возвращает его без создания нового.
         """
+        existing = await self.get_current(user.telegram_id)
+        if existing is not None:
+            return existing
+
         anchor = anchor_date or date.today()
         start = _monday(anchor)
         if start < anchor:

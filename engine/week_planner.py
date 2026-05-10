@@ -306,12 +306,16 @@ def _layout_days(
     l3_combo = (level == 3 and not injury_return)
 
     for i, day in enumerate(other_days):
-        if len(strength_days) < n_strength and day not in forbidden_strength:
+        # Не ставим силовую если предыдущий день тоже силовой
+        would_be_consecutive = strength_days and day == strength_days[-1] + 1
+        if (len(strength_days) < n_strength
+                and day not in forbidden_strength
+                and not would_be_consecutive):
             strength_days.append(day)
         else:
             run_days.append(day)
 
-    # Если силовых дней не хватает — добираем из run_days
+    # Если силовых дней не хватает — добираем из run_days (уже без ограничения на смежность)
     while len(strength_days) < n_strength and run_days:
         strength_days.append(run_days.pop(0))
 
