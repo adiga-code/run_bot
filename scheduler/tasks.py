@@ -540,8 +540,11 @@ async def _auto_send_new_system(
     """
     from datetime import date as date_cls
     from sqlalchemy import select as sa_select
-    from database.models import DayPlan, WorkoutTemplate
-    from engine.workout_renderer import render_workout
+    from database.models import DayPlan, WeekPlan, WorkoutTemplate
+    from engine.workout_renderer import (
+        render_run_workout, render_strength_from_template, RenderedWorkout,
+    )
+    from texts import T
 
     if version == "rest":
         await bot.send_message(
@@ -551,7 +554,6 @@ async def _auto_send_new_system(
         )
         return
 
-    # Получаем day_type из DayPlan
     day_type = "run"
     run_subtype = None
     if log.day_plan_id:
@@ -563,41 +565,69 @@ async def _auto_send_new_system(
             day_type = dp.day_type
             run_subtype = dp.run_subtype
 
+    week_plan = None
+    if log.week_plan_id:
+        wp_res = await session.execute(
+            sa_select(WeekPlan).where(WeekPlan.id == log.week_plan_id)
+        )
+        week_plan = wp_res.scalar_one_or_none()
+
     target_minutes = log.planned_minutes or user.weekly_target_minutes or 30
+    level = user.level or 1
+    period = week_plan.period if week_plan else user.current_period
 
-    # Ищем WorkoutTemplate: period-specific → универсальный
-    tmpl = None
-    for period_filter in (user.current_period, None):
-        q = sa_select(WorkoutTemplate).where(
-            WorkoutTemplate.level == user.level,
-            WorkoutTemplate.day_type == day_type,
-            WorkoutTemplate.version == version,
+    if day_type == "run":
+        rendered = render_run_workout(
+            run_subtype=run_subtype or "easy",
+            target_minutes=target_minutes,
+            version=version,
+            level=level,
+            period=period,
+            long_stage=2 if getattr(user, "l1_long_independent", False) else 1,
         )
-        if period_filter is not None:
-            q = q.where(WorkoutTemplate.period == period_filter)
-        else:
-            q = q.where(WorkoutTemplate.period.is_(None))
-        if run_subtype:
-            q = q.where(WorkoutTemplate.run_subtype == run_subtype)
-        res = await session.execute(q.limit(1))
-        tmpl = res.scalar_one_or_none()
+    elif day_type == "strength":
+        tmpl = None
+        for period_filter in (period, None):
+            q = sa_select(WorkoutTemplate).where(
+                WorkoutTemplate.level == level,
+                WorkoutTemplate.day_type == "strength",
+                WorkoutTemplate.version == version,
+            )
+            if period_filter is not None:
+                q = q.where(WorkoutTemplate.period == period_filter)
+            else:
+                q = q.where(WorkoutTemplate.period.is_(None))
+            if user.strength_format:
+                q = q.where(WorkoutTemplate.strength_format == user.strength_format)
+            res = await session.execute(q.limit(1))
+            tmpl = res.scalar_one_or_none()
+            if tmpl:
+                break
         if tmpl:
-            break
-
-    if tmpl:
-        rendered = render_workout(tmpl, target_minutes, version)
-        dow = log.day_of_week or date_cls.today().isoweekday()
-        week_num = user.program_week_number or 1
-        header = T.checkin.workout_header_new.format(
-            week=week_num, dow=dow, title=rendered.title,
-        )
-        workout_text = header + "\n\n" + rendered.text
+            rendered = render_strength_from_template(tmpl, target_minutes, version)
+        else:
+            rendered = RenderedWorkout(
+                title="Силовая тренировка",
+                text=T.checkin.no_template_fallback,
+                planned_minutes=target_minutes,
+                version=version,
+            )
     else:
-        workout_text = T.checkin.no_template_fallback
+        rendered = RenderedWorkout(
+            title="Тренировка",
+            text=T.checkin.no_template_fallback,
+            planned_minutes=target_minutes,
+            version=version,
+        )
 
+    dow = log.day_of_week or date_cls.today().isoweekday()
+    week_num = user.program_week_number or 1
+    header = T.checkin.workout_header_new.format(
+        week=week_num, dow=dow, title=rendered.title,
+    )
     await bot.send_message(
         chat_id=log.user_id,
-        text=workout_text,
+        text=header + "\n\n" + rendered.text,
         parse_mode="HTML",
         reply_markup=kb_completion_v2(),
     )
