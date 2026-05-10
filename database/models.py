@@ -85,7 +85,7 @@ class User(Base):
     last_successful_volume: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Referral tracking
-    referral_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    referral_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # ── NEW: период и цикл ────────────────────────────────────────────────────
     # base_in / base / preparatory / specialized / recovery_period
@@ -362,6 +362,7 @@ class ReferralLink(Base):
     created_by: Mapped[int] = mapped_column(BigInteger, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
 
 
 class Event(Base):

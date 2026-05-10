@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from handlers.utils import safe_answer
 from keyboards.builders import kb_completion, kb_effort, kb_had_pain, kb_main_menu, kb_completion_strength
 from services.session_log_service import SessionLogService
+from services.user_service import UserService
 from texts import T
 
 router = Router()
@@ -123,6 +124,7 @@ async def _save_completion(callback: CallbackQuery, data: dict, session: AsyncSe
         return
 
     log_svc = SessionLogService(session)
+    user_svc = UserService(session)
     log = await log_svc.get_today(callback.from_user.id)
     if log:
         await log_svc.update(
@@ -138,6 +140,8 @@ async def _save_completion(callback: CallbackQuery, data: dict, session: AsyncSe
         reply_markup=kb_main_menu(),
     )
 
-    # Day 28 — program complete
-    if log and log.day_index == 28 and data["status"] in ("done", "partial"):
-        await callback.message.answer(T.workout.program_complete, parse_mode="HTML")
+    # Last program day — show completion message
+    if log and data["status"] in ("done", "partial"):
+        user = await user_svc.get(callback.from_user.id)
+        if user and log.day_index == user_svc._max_day(user):
+            await callback.message.answer(T.workout.program_complete, parse_mode="HTML")

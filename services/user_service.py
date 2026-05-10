@@ -54,8 +54,8 @@ class UserService:
         return user
 
     def _max_day(self, user: User) -> int:
-        """Returns the maximum program day for this user (28 or 49 if extended weeks are activated)."""
-        return 49 if getattr(user, "extended_week5", False) else 28
+        """Returns the maximum program day for this user (28 or 56 if extended weeks are activated)."""
+        return 56 if getattr(user, "extended_week5", False) else 28
 
     async def current_calendar_day(self, user: User) -> int | None:
         """
