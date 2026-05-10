@@ -107,11 +107,13 @@ class WeekPlanService:
     async def create_first_week(self, user: User, anchor_date: date | None = None) -> WeekPlan:
         """
         Создаёт первый WeekPlan сразу после одобрения тренером.
-        start_date = понедельник недели, в которую попадает anchor_date.
-        Так anchor_date гарантированно входит в созданный план.
+        start_date = ближайший понедельник от anchor_date (по умолч. сегодня).
         """
         anchor = anchor_date or date.today()
         start = _monday(anchor)
+        if start < anchor:
+            # Неделя уже началась — берём следующий понедельник
+            start = start + timedelta(weeks=1)
 
         return await self._create_week(
             user=user,
