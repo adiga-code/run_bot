@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import SessionLog
-from engine.fatigue import RecentLogData
+from engine.red_flags import DayPainData
 
 
 class SessionLogService:
@@ -70,8 +70,30 @@ class SessionLogService:
         await self.session.refresh(log)
         return log
 
-    async def get_recent(self, user_id: int, limit: int = 3) -> list[RecentLogData]:
-        """Fetch recent completed days as RecentLogData for the fatigue detector."""
+    async def get_recent(self, user_id: int, limit: int = 3) -> list[DayPainData]:
+        """
+        Последние дни с чек-ином в виде DayPainData (новая система).
+        Используется rule_engine и week_evaluator для анализа боли.
+        Порядок: от старых к новым (oldest first).
+        """
+        result = await self.session.execute(
+            select(SessionLog)
+            .where(SessionLog.user_id == user_id, SessionLog.checkin_done == True)
+            .order_by(SessionLog.date.desc())
+            .limit(limit)
+        )
+        logs = list(result.scalars().all())
+        return [
+            DayPainData(pain_level=log.pain_level)
+            for log in reversed(logs)  # oldest first
+        ]
+
+    async def get_recent_legacy(self, user_id: int, limit: int = 3):
+        """
+        УСТАРЕЛО: возвращает RecentLogData для старого fatigue detector.
+        Используется только для старых (28-день) пользователей.
+        """
+        from engine.fatigue import RecentLogData
         result = await self.session.execute(
             select(SessionLog)
             .where(SessionLog.user_id == user_id, SessionLog.checkin_done == True)
@@ -91,8 +113,52 @@ class SessionLogService:
             for log in reversed(logs)  # oldest first
         ]
 
+    # ── Методы новой цикловой системы ────────────────────────────────────────
+
+    async def get_logs_for_week_plan(self, week_plan_id: int) -> list[SessionLog]:
+        """Все SessionLog, привязанные к данной WeekPlan (по week_plan_id)."""
+        result = await self.session.execute(
+            select(SessionLog)
+            .where(SessionLog.week_plan_id == week_plan_id)
+            .order_by(SessionLog.day_of_week)
+        )
+        return list(result.scalars().all())
+
+    async def completion_rate_for_week_plan(self, week_plan_id: int) -> float:
+        """
+        Процент выполнения для данной WeekPlan (новая система).
+        done=1, skipped=0. Partial не учитывается.
+        Знаменатель = количество запланированных (non-rest) DayPlan.
+        """
+        from sqlalchemy import func
+        from database.models import DayPlan
+
+        n_planned_result = await self.session.execute(
+            select(func.count()).where(
+                DayPlan.week_plan_id == week_plan_id,
+                DayPlan.day_type != "rest",
+            )
+        )
+        n_planned = n_planned_result.scalar_one()
+        if n_planned == 0:
+            return 0.0
+
+        n_done_result = await self.session.execute(
+            select(func.count()).where(
+                SessionLog.week_plan_id == week_plan_id,
+                SessionLog.completion_status == "done",
+            )
+        )
+        n_done = n_done_result.scalar_one()
+        return n_done / n_planned
+
+    # ── Методы старой 28-дневной системы (deprecated) ────────────────────────
+
     async def completed_count(self, user_id: int) -> int:
-        """Number of days marked as done or partial."""
+        """
+        Number of days marked as done or partial.
+        УСТАРЕЛО: для новой системы используйте completion_rate_for_week_plan.
+        """
         from sqlalchemy import func
         result = await self.session.execute(
             select(func.count()).where(
@@ -145,6 +211,7 @@ class SessionLogService:
         self, user_id: int, week_start_day: int, week_end_day: int
     ) -> float:
         """
+        УСТАРЕЛО: для 28-дневной системы (по day_index).
         Completion rate for days in [week_start_day, week_end_day].
         done=1.0, partial=0.5, skipped=0.0, no record=0.0
         Returns float in [0.0, 1.0].
@@ -184,6 +251,7 @@ class SessionLogService:
         self, user_id: int, start_date, end_date
     ) -> float:
         """
+        УСТАРЕЛО: для 28-дневной системы (по дате).
         Completion rate for a calendar date range.
         Used by _check_week_completion so repeated weeks don't double-count
         old logs with the same template day_index values.

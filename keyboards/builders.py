@@ -5,7 +5,7 @@ from data.timezones import TIMEZONES
 from texts import T
 
 
-# ── Onboarding ────────────────────────────────────────────────────────────────
+# ── Onboarding ─────────────────────────────────────────────────────────────────────────────
 
 def kb_skip(callback_data: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -222,6 +222,35 @@ def kb_location() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def kb_continuous_run_test() -> InlineKeyboardMarkup:
+    """Вопрос о том, может ли пользователь бежать 20+ мин непрерывно (L1)."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text=T.btn.crt_yes,    callback_data="onb:crt:yes")
+    builder.button(text=T.btn.crt_no,     callback_data="onb:crt:no")
+    builder.button(text=T.btn.crt_unsure, callback_data="onb:crt:unsure")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+_WEEKDAYS = [
+    (1, "Пн"), (2, "Вт"), (3, "Ср"), (4, "Чт"), (5, "Пт"), (6, "Сб"), (7, "Вс"),
+]
+
+
+def kb_available_days(selected: list[int]) -> InlineKeyboardMarkup:
+    """Мультиселект доступных дней недели (1=Пн..7=Вс)."""
+    builder = InlineKeyboardBuilder()
+    for num, label in _WEEKDAYS:
+        prefix = "✅ " if num in selected else ""
+        builder.button(
+            text=f"{prefix}{label}",
+            callback_data=f"onb:avday:{num}",
+        )
+    builder.button(text=T.btn.done_arrow, callback_data="onb:avday:done")
+    builder.adjust(4, 3, 1)
+    return builder.as_markup()
+
+
 def kb_timezone() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for tz in TIMEZONES:
@@ -233,7 +262,7 @@ def kb_timezone() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Check-in ──────────────────────────────────────────────────────────────────
+# ── Check-in ─────────────────────────────────────────────────────────────────────────────
 
 def kb_wellbeing() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -298,12 +327,22 @@ def kb_pain_increases_checkin() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Workout completion ────────────────────────────────────────────────────────
+# ── Workout completion ─────────────────────────────────────────────────────────────────────────
 
 def kb_completion() -> InlineKeyboardMarkup:
+    """Кнопки завершения тренировки (СТАРАЯ система: done/partial/skipped)."""
     builder = InlineKeyboardBuilder()
     builder.button(text=T.btn.completion_done,    callback_data="wk:status:done")
     builder.button(text=T.btn.completion_partial, callback_data="wk:status:partial")
+    builder.button(text=T.btn.completion_skipped, callback_data="wk:status:skipped")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_completion_v2() -> InlineKeyboardMarkup:
+    """Кнопки завершения тренировки (НОВАЯ система: done/skipped, без partial)."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text=T.btn.completion_done,    callback_data="wk:status:done")
     builder.button(text=T.btn.completion_skipped, callback_data="wk:status:skipped")
     builder.adjust(1)
     return builder.as_markup()
@@ -343,7 +382,7 @@ def kb_had_pain() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Admin approval ────────────────────────────────────────────────────────────
+# ── Admin approval ─────────────────────────────────────────────────────────────────────────
 
 def kb_apply() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -360,7 +399,7 @@ def kb_admin_application(user_id: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Events (user) ─────────────────────────────────────────────────────────────
+# ── Events (user) ───────────────────────────────────────────────────────────────────────────
 
 def kb_welcome() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -393,7 +432,7 @@ def kb_skip_email() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Events (admin) ─────────────────────────────────────────────────────────────
+# ── Events (admin) ────────────────────────────────────────────────────────────────────────────
 
 def kb_admin_events_list(events: list) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -484,18 +523,33 @@ def kb_admin_report_actions(user_id: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def kb_admin_manage(user_id: int, extended: bool = False) -> InlineKeyboardMarkup:
+def kb_admin_manage(
+    user_id: int,
+    extended: bool = False,
+    has_red_flag: bool = False,
+    current_period: str | None = None,
+) -> InlineKeyboardMarkup:
+    """Кнопки управления пользователем.
+    Для новой логики (current_period != None) убираем кнопки,
+    специфичные для 28-дневной программы.
+    """
+    is_new = current_period is not None
     builder = InlineKeyboardBuilder()
-    builder.button(text=T.btn.adm_change_mode,   callback_data=f"adm:mode:{user_id}")
-    builder.button(text=T.btn.adm_jump_day,      callback_data=f"adm:jump:{user_id}")
-    builder.button(text=T.btn.adm_change_level,  callback_data=f"adm:pick:{user_id}")
-    builder.button(text=T.btn.adm_mark_workout,  callback_data=f"adm:markday:{user_id}")
-    builder.button(text=T.btn.adm_send_msg,      callback_data=f"adm:msg:{user_id}")
-    builder.button(text=T.btn.adm_send_checkin,  callback_data=f"adm:send_checkin:{user_id}")
-    if not extended:
-        builder.button(text=T.btn.adm_extend_week5, callback_data=f"adm:extend:{user_id}")
-    else:
-        builder.button(text=T.btn.adm_week5_active, callback_data=f"adm:extend:off:{user_id}")
+    builder.button(text=T.btn.adm_change_mode,  callback_data=f"adm:mode:{user_id}")
+    if not is_new:
+        builder.button(text=T.btn.adm_jump_day, callback_data=f"adm:jump:{user_id}")
+    builder.button(text=T.btn.adm_change_level, callback_data=f"adm:pick:{user_id}")
+    if not is_new:
+        builder.button(text=T.btn.adm_mark_workout, callback_data=f"adm:markday:{user_id}")
+    builder.button(text=T.btn.adm_send_msg,     callback_data=f"adm:msg:{user_id}")
+    builder.button(text=T.btn.adm_send_checkin, callback_data=f"adm:send_checkin:{user_id}")
+    if not is_new:
+        if not extended:
+            builder.button(text=T.btn.adm_extend_week5, callback_data=f"adm:extend:{user_id}")
+        else:
+            builder.button(text=T.btn.adm_week5_active, callback_data=f"adm:extend:off:{user_id}")
+    if has_red_flag:
+        builder.button(text="🚩 Снять red flag", callback_data=f"adm:red_flag:remove:{user_id}")
     builder.button(text="🗑 Удалить пользователя", callback_data=f"adm:delete:{user_id}")
     builder.button(text=T.btn.back, callback_data=f"adm:report:view:{user_id}")
     builder.adjust(1)
@@ -540,7 +594,18 @@ def kb_checkin_approve(user_id: int) -> InlineKeyboardMarkup:
     builder.button(text=T.btn.adm_ci_recovery, callback_data=f"adm:ca:{user_id}:recovery")
     builder.button(text=T.btn.adm_ci_rest,     callback_data=f"adm:ca:{user_id}:rest")
     builder.button(text=T.btn.adm_ci_preview,  callback_data=f"adm:preview:{user_id}")
-    builder.adjust(2, 2, 1)
+    builder.button(text="✏️ Свой текст",       callback_data=f"adm:override:text:{user_id}")
+    builder.adjust(2, 2, 2)
+    return builder.as_markup()
+
+
+def kb_coach_override_minutes(user_id: int) -> InlineKeyboardMarkup:
+    """Кнопки изменения количества минут при override тренировки."""
+    builder = InlineKeyboardBuilder()
+    for mins in [20, 30, 40, 45, 60, 75, 90]:
+        builder.button(text=f"{mins} мин", callback_data=f"adm:override:mins:{user_id}:{mins}")
+    builder.button(text="✏️ Другое", callback_data=f"adm:override:mins_custom:{user_id}")
+    builder.adjust(4, 3, 1)
     return builder.as_markup()
 
 
@@ -567,6 +632,7 @@ def kb_admin_approve(user_id: int, level: int) -> InlineKeyboardMarkup:
         text=T.btn.adm_start_tomorrow_fmt.format(level=level, name=name),
         callback_data=f"adm:approve:tomorrow:{user_id}:{level}",
     )
+    builder.button(text="📅 На дату...", callback_data=f"adm:approve:askdate:{user_id}:{level}")
     builder.button(text=T.btn.adm_edit_level, callback_data=f"adm:pick:{user_id}")
     builder.adjust(1)
     return builder.as_markup()
@@ -577,7 +643,8 @@ def kb_admin_start_choice(user_id: int, level: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=T.btn.adm_start_today,    callback_data=f"adm:approve:today:{user_id}:{level}")
     builder.button(text=T.btn.adm_start_tomorrow, callback_data=f"adm:approve:tomorrow:{user_id}:{level}")
-    builder.adjust(2)
+    builder.button(text="📅 На дату...",           callback_data=f"adm:approve:askdate:{user_id}:{level}")
+    builder.adjust(2, 1)
     return builder.as_markup()
 
 
@@ -591,7 +658,7 @@ def kb_admin_level_picker(user_id: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Evening reminder mark button ──────────────────────────────────────────────
+# ── Evening reminder mark button ────────────────────────────────────────────────────────────────────
 
 def kb_mark_workout() -> InlineKeyboardMarkup:
     """Single button for evening reminder — triggers the completion FSM."""
@@ -601,7 +668,7 @@ def kb_mark_workout() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Strength day options ──────────────────────────────────────────────────────
+# ── Strength day options ────────────────────────────────────────────────────────────────────────
 
 def kb_strength_day_options() -> InlineKeyboardMarkup:
     """Shown after strength workout is displayed: mark it or do a custom workout."""
@@ -614,7 +681,7 @@ def kb_strength_day_options() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Absence flow ──────────────────────────────────────────────────────────────
+# ── Absence flow ────────────────────────────────────────────────────────────────────────────
 
 def kb_absence_reason() -> InlineKeyboardMarkup:
     """Sent when user hasn't checked in for 3 days — ask why."""
@@ -638,7 +705,7 @@ def kb_return_training() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# ── Progress / Main menu ──────────────────────────────────────────────────────
+# ── Progress / Main menu ─────────────────────────────────────────────────────────────────────────
 
 def kb_main_menu(checkin_done: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()

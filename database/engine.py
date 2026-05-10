@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -7,65 +8,38 @@ from sqlalchemy import text
 from config import settings
 from database.models import Base
 
+logger = logging.getLogger(__name__)
+
 engine = create_async_engine(settings.database_url, echo=False)
 session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
 async def create_db() -> None:
-    """Create all tables and run incremental migrations."""
+    """Create initial tables (new installs only) and run Alembic migrations."""
+    # create_all создаёт таблицы только если их нет (безопасно для существующих БД)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    await _migrate_db()
+    await _run_alembic_migrations()
 
 
-async def _migrate_db() -> None:
-    """ADD COLUMN IF NOT EXISTS migrations — safe to run on every restart."""
-    migrations: list[tuple[str, str, str]] = [
-        # (table, column, definition)
-        ("users",        "status",               "VARCHAR(20) DEFAULT 'active'"),
-        ("users",        "q_runs",               "VARCHAR(20)"),
-        ("users",        "q_structure",          "VARCHAR(10)"),
-        # Блок 1 — профиль
-        ("users",        "last_name",            "VARCHAR(100)"),
-        ("users",        "first_name",           "VARCHAR(100)"),
-        ("users",        "middle_name",          "VARCHAR(100)"),
-        ("users",        "gender",               "VARCHAR(10)"),
-        # Блок 2 — цель
-        ("users",        "q_goal",               "VARCHAR(50)"),
-        ("users",        "q_distance",           "VARCHAR(20)"),
-        ("users",        "q_race_date",          "VARCHAR(50)"),
-        # Блок 3 — текущий уровень
-        ("users",        "q_longest_run",        "VARCHAR(20)"),
-        # Блок 4 — опыт
-        ("users",        "q_experience",         "VARCHAR(20)"),
-        ("users",        "q_break_duration",     "VARCHAR(20)"),
-        # Блок 5 — ощущения
-        ("users",        "q_run_feel",           "VARCHAR(20)"),
-        # Блок 6 — боль
-        ("users",        "q_pain_location",      "VARCHAR(200)"),
-        ("users",        "q_injury_history",     "VARCHAR(10)"),
-        # Блок 7 — физическая форма
-        ("users",        "q_other_sports",       "VARCHAR(200)"),
-        ("users",        "q_strength_frequency", "VARCHAR(20)"),
-        # Блок 8 — самооценка
-        ("users",        "q_self_level",         "VARCHAR(20)"),
-        # Extended program
-        ("users",        "extended_week5",       "BOOLEAN DEFAULT FALSE"),
-        # session_logs
-        ("session_logs", "stress_level",         "INTEGER"),
-        ("session_logs", "red_flag",             "BOOLEAN DEFAULT FALSE"),
-        ("session_logs", "fatigue_reduction",    "BOOLEAN DEFAULT FALSE"),
-        ("session_logs", "morning_sent",         "BOOLEAN DEFAULT FALSE"),
-        ("session_logs", "evening_sent",         "BOOLEAN DEFAULT FALSE"),
-        ("session_logs", "approval_pending",     "BOOLEAN DEFAULT FALSE"),
-        ("session_logs", "checkin_at",           "TIMESTAMP WITH TIME ZONE"),
-        ("users",        "referral_code",        "VARCHAR(100)"),
-    ]
-    async with engine.begin() as conn:
-        for table, column, definition in migrations:
-            await conn.execute(
-                text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}")
-            )
+async def _run_alembic_migrations() -> None:
+    """
+    Запускаем pending Alembic-миграции при старте.
+    Безопасно при многократных запусках — применяются только новые версии.
+    """
+    try:
+        import asyncio
+        from alembic.config import Config
+        from alembic import command
+
+        alembic_cfg = Config("alembic.ini")
+        # Запускаем в отдельном потоке, т.к. Alembic sync API
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: command.upgrade(alembic_cfg, "head"))
+        logger.info("Alembic migrations applied successfully")
+    except Exception as e:
+        # Не падаем если Alembic не настроен или уже на head
+        logger.warning("Alembic migration skipped: %s", e)
 
 
 async def seed_workouts() -> None:

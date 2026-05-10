@@ -78,14 +78,16 @@ async def cb_custom_workout(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("wk:status:"))
 async def cb_completion_status(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     status = callback.data.split(":")[2]
+    # В новой системе "partial" не используется. Если пришёл partial — конвертируем.
+    # Для старых пользователей partial сохраняется как есть.
     await state.set_state(WorkoutStates.completion)
     await state.update_data(status=status)
     await callback.message.edit_reply_markup()
     await safe_answer(callback)
 
-    if status == "skipped":
+    if status in ("skipped", "partial"):
         await state.clear()
-        await _save_completion(callback, {"status": "skipped", "effort": None, "had_pain": None}, session)
+        await _save_completion(callback, {"status": status, "effort": None, "had_pain": None}, session)
         return
 
     await state.set_state(WorkoutStates.effort)
