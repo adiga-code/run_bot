@@ -1636,12 +1636,15 @@ async def _approve_checkin_new(
     """
     from datetime import date as date_cls
     from sqlalchemy import select as sa_select
-    from database.models import DayPlan, WorkoutTemplate
-    from engine.workout_renderer import render_workout
+    from database.models import DayPlan, WeekPlan, WorkoutTemplate
+    from engine.workout_renderer import (
+        render_run_workout, render_strength_from_template, RenderedWorkout,
+    )
 
     # ── Определяем day_type/run_subtype из DayPlan ───────────────────────────
     day_type = "run"
     run_subtype = None
+    day_plan = None
     if log.day_plan_id:
         dp_res = await session.execute(
             sa_select(DayPlan).where(DayPlan.id == log.day_plan_id)
@@ -1650,6 +1653,13 @@ async def _approve_checkin_new(
         if day_plan:
             day_type = day_plan.day_type
             run_subtype = day_plan.run_subtype
+
+    week_plan = None
+    if log.week_plan_id:
+        wp_res = await session.execute(
+            sa_select(WeekPlan).where(WeekPlan.id == log.week_plan_id)
+        )
+        week_plan = wp_res.scalar_one_or_none()
 
     # ── Rest / shortcut ───────────────────────────────────────────────────────
     if version == "rest":
@@ -1672,37 +1682,61 @@ async def _approve_checkin_new(
         )
         return
 
-    # ── Ищем WorkoutTemplate: сначала period-specific, затем универсальный ───
-    target_minutes = log.planned_minutes or user.weekly_target_minutes or 30
-    tmpl = None
-    for period_filter in (user.current_period, None):
-        q = sa_select(WorkoutTemplate).where(
-            WorkoutTemplate.level == user.level,
-            WorkoutTemplate.day_type == day_type,
-            WorkoutTemplate.version == version,
-        )
-        if period_filter is not None:
-            q = q.where(WorkoutTemplate.period == period_filter)
-        else:
-            q = q.where(WorkoutTemplate.period.is_(None))
-        if run_subtype:
-            q = q.where(WorkoutTemplate.run_subtype == run_subtype)
-        res = await session.execute(q.limit(1))
-        tmpl = res.scalar_one_or_none()
-        if tmpl:
-            break
-
     # ── Рендер ───────────────────────────────────────────────────────────────
-    if tmpl:
-        rendered = render_workout(tmpl, target_minutes, version)
-        dow = log.day_of_week or date_cls.today().isoweekday()
-        week_num = user.program_week_number or 1
-        header = T.checkin.workout_header_new.format(
-            week=week_num, dow=dow, title=rendered.title,
+    target_minutes = log.planned_minutes or user.weekly_target_minutes or 30
+    level = user.level or 1
+    period = week_plan.period if week_plan else user.current_period
+
+    if day_type == "run":
+        rendered = render_run_workout(
+            run_subtype=run_subtype or "easy",
+            target_minutes=target_minutes,
+            version=version,
+            level=level,
+            period=period,
+            long_stage=2 if getattr(user, "l1_long_independent", False) else 1,
         )
-        workout_text = header + "\n\n" + rendered.text
+    elif day_type == "strength":
+        tmpl = None
+        for period_filter in (period, None):
+            q = sa_select(WorkoutTemplate).where(
+                WorkoutTemplate.level == level,
+                WorkoutTemplate.day_type == "strength",
+                WorkoutTemplate.version == version,
+            )
+            if period_filter is not None:
+                q = q.where(WorkoutTemplate.period == period_filter)
+            else:
+                q = q.where(WorkoutTemplate.period.is_(None))
+            if user.strength_format:
+                q = q.where(WorkoutTemplate.strength_format == user.strength_format)
+            res = await session.execute(q.limit(1))
+            tmpl = res.scalar_one_or_none()
+            if tmpl:
+                break
+        if tmpl:
+            rendered = render_strength_from_template(tmpl, target_minutes, version)
+        else:
+            rendered = RenderedWorkout(
+                title="Силовая тренировка",
+                text=T.checkin.no_template_fallback,
+                planned_minutes=target_minutes,
+                version=version,
+            )
     else:
-        workout_text = T.checkin.no_template_fallback
+        rendered = RenderedWorkout(
+            title="Тренировка",
+            text=T.checkin.no_template_fallback,
+            planned_minutes=target_minutes,
+            version=version,
+        )
+
+    dow = log.day_of_week or date_cls.today().isoweekday()
+    week_num = user.program_week_number or 1
+    header = T.checkin.workout_header_new.format(
+        week=week_num, dow=dow, title=rendered.title,
+    )
+    workout_text = header + "\n\n" + rendered.text
 
     await log_svc.update(log, assigned_version=version, approval_pending=False)
     await callback.bot.send_message(
@@ -1844,8 +1878,10 @@ async def _resend_workout_with_minutes(
     """
     from datetime import date as date_cls
     from sqlalchemy import select as sa_select
-    from database.models import DayPlan, SessionLog, WorkoutTemplate
-    from engine.workout_renderer import render_workout
+    from database.models import DayPlan, SessionLog, WeekPlan, WorkoutTemplate
+    from engine.workout_renderer import (
+        render_run_workout, render_strength_from_template, RenderedWorkout,
+    )
 
     result = await session.execute(
         sa_select(SessionLog).where(
@@ -1873,35 +1909,66 @@ async def _resend_workout_with_minutes(
             day_type = dp.day_type
             run_subtype = dp.run_subtype
 
-    # Ищем шаблон (period-specific → универсальный)
-    tmpl = None
-    for period_filter in (user.current_period, None):
-        q = sa_select(WorkoutTemplate).where(
-            WorkoutTemplate.level == user.level,
-            WorkoutTemplate.day_type == day_type,
-            WorkoutTemplate.version == version,
+    week_plan = None
+    if log.week_plan_id:
+        wp_res = await session.execute(
+            sa_select(WeekPlan).where(WeekPlan.id == log.week_plan_id)
         )
-        if period_filter is not None:
-            q = q.where(WorkoutTemplate.period == period_filter)
-        else:
-            q = q.where(WorkoutTemplate.period.is_(None))
-        if run_subtype:
-            q = q.where(WorkoutTemplate.run_subtype == run_subtype)
-        res = await session.execute(q.limit(1))
-        tmpl = res.scalar_one_or_none()
-        if tmpl:
-            break
+        week_plan = wp_res.scalar_one_or_none()
 
-    if tmpl:
-        rendered = render_workout(tmpl, new_minutes, version)
-        dow = log.day_of_week or date_cls.today().isoweekday()
-        week_num = user.program_week_number or 1
-        header = T.checkin.workout_header_new.format(
-            week=week_num, dow=dow, title=rendered.title,
+    level = user.level or 1
+    period = week_plan.period if week_plan else user.current_period
+
+    if day_type == "run":
+        rendered = render_run_workout(
+            run_subtype=run_subtype or "easy",
+            target_minutes=new_minutes,
+            version=version,
+            level=level,
+            period=period,
+            long_stage=2 if getattr(user, "l1_long_independent", False) else 1,
         )
-        workout_text = header + "\n\n" + rendered.text
+    elif day_type == "strength":
+        tmpl = None
+        for period_filter in (period, None):
+            q = sa_select(WorkoutTemplate).where(
+                WorkoutTemplate.level == level,
+                WorkoutTemplate.day_type == "strength",
+                WorkoutTemplate.version == version,
+            )
+            if period_filter is not None:
+                q = q.where(WorkoutTemplate.period == period_filter)
+            else:
+                q = q.where(WorkoutTemplate.period.is_(None))
+            if user.strength_format:
+                q = q.where(WorkoutTemplate.strength_format == user.strength_format)
+            res = await session.execute(q.limit(1))
+            tmpl = res.scalar_one_or_none()
+            if tmpl:
+                break
+        if tmpl:
+            rendered = render_strength_from_template(tmpl, new_minutes, version)
+        else:
+            rendered = RenderedWorkout(
+                title="Силовая тренировка",
+                text=T.checkin.no_template_fallback,
+                planned_minutes=new_minutes,
+                version=version,
+            )
     else:
-        workout_text = T.checkin.no_template_fallback
+        rendered = RenderedWorkout(
+            title="Тренировка",
+            text=T.checkin.no_template_fallback,
+            planned_minutes=new_minutes,
+            version=version,
+        )
+
+    dow = log.day_of_week or date_cls.today().isoweekday()
+    week_num = user.program_week_number or 1
+    header = T.checkin.workout_header_new.format(
+        week=week_num, dow=dow, title=rendered.title,
+    )
+    workout_text = header + "\n\n" + rendered.text
 
     from services.session_log_service import SessionLogService
     log_svc = SessionLogService(session)

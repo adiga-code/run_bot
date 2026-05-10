@@ -18,7 +18,10 @@ from config import settings
 from data.interpretations import get_interpretation
 from texts import T
 from engine.rule_engine import CheckinData, RecentDayData, WorkoutDecision, decide_workout_version
-from engine.workout_renderer import RenderedWorkout, render_workout, render_rest_day, render_recovery_day
+from engine.workout_renderer import (
+    RenderedWorkout, render_workout, render_rest_day, render_recovery_day,
+    render_run_workout, render_strength_from_template,
+)
 from keyboards.builders import (
     kb_main_menu, kb_completion, kb_completion_strength, kb_mark_workout,
     kb_pain_checkin, kb_sleep, kb_stress, kb_wellbeing,
@@ -255,38 +258,44 @@ async def _show_today_new(
     elif log.assigned_version == "recovery":
         rendered = render_recovery_day()
     else:
-        template = None
-        if day_plan.run_subtype or day_plan.day_type == "strength":
-            from sqlalchemy.orm import selectinload
-            from database.models import WeekPlan
-            wp_result = await session.execute(
-                select(WeekPlan).where(WeekPlan.id == log.week_plan_id)
-            )
-            week_plan = wp_result.scalar_one_or_none()
-            template = await _get_workout_template(
-                session=session,
-                level=user.level or 1,
+        from database.models import WeekPlan
+        wp_result = await session.execute(
+            select(WeekPlan).where(WeekPlan.id == log.week_plan_id)
+        )
+        week_plan = wp_result.scalar_one_or_none()
+        level = user.level or 1
+        minutes = log.planned_minutes or day_plan.planned_minutes or 0
+
+        if day_plan.day_type == "run":
+            rendered = render_run_workout(
+                run_subtype=day_plan.run_subtype or "easy",
+                target_minutes=minutes,
+                version=log.assigned_version,
+                level=level,
                 period=week_plan.period if week_plan else None,
-                day_type=day_plan.day_type,
-                run_subtype=day_plan.run_subtype,
-                version=log.assigned_version,
-                strength_format=user.strength_format if day_plan.day_type == "strength" else None,
-            )
-        if template:
-            rendered = render_workout(
-                template=template,
-                target_minutes=log.planned_minutes or day_plan.planned_minutes or 0,
-                version=log.assigned_version,
-                intensity_kind=day_plan.run_subtype,
                 long_stage=2 if getattr(user, "l1_long_independent", False) else 1,
             )
-        else:
-            rendered = RenderedWorkout(
-                title="Тренировка",
-                text=T.checkin.no_template_fallback,
-                planned_minutes=log.planned_minutes or 0,
-                version=log.assigned_version or "base",
+        elif day_plan.day_type == "strength":
+            template = await _get_workout_template(
+                session=session,
+                level=level,
+                period=week_plan.period if week_plan else None,
+                day_type="strength",
+                run_subtype=None,
+                version=log.assigned_version,
+                strength_format=user.strength_format,
             )
+            if template:
+                rendered = render_strength_from_template(template, minutes, log.assigned_version)
+            else:
+                rendered = RenderedWorkout(
+                    title="Силовая тренировка",
+                    text=T.checkin.no_template_fallback,
+                    planned_minutes=minutes,
+                    version=log.assigned_version or "base",
+                )
+        else:
+            rendered = render_rest_day()
 
     is_strength = day_plan is not None and day_plan.day_type == "strength" and log.assigned_version != "recovery"
     header = T.checkin.workout_header_new.format(
@@ -464,38 +473,42 @@ async def _finish_checkin_new(
     # Решение о версии тренировки
     decision = decide_workout_version(checkin, day_plan.day_type, yesterday_data)
 
-    # Ищем шаблон тренировки
-    template = await _get_workout_template(
-        session=session,
-        level=level,
-        period=week_plan.period,
-        day_type=day_plan.day_type,
-        run_subtype=day_plan.run_subtype,
-        version=decision.version,
-        strength_format=user.strength_format if day_plan.day_type == "strength" else None,
-    )
-
     # Рендер тренировки
+    minutes = day_plan.planned_minutes or 0
     if decision.version == "rest" or day_plan.day_type == "rest":
         rendered = render_rest_day()
     elif decision.version == "recovery":
         rendered = render_recovery_day()
-    elif template:
-        rendered = render_workout(
-            template=template,
-            target_minutes=day_plan.planned_minutes or 0,
+    elif day_plan.day_type == "run":
+        rendered = render_run_workout(
+            run_subtype=day_plan.run_subtype or "easy",
+            target_minutes=minutes,
             version=decision.version,
-            intensity_kind=day_plan.run_subtype,
+            level=level,
+            period=week_plan.period,
             long_stage=2 if getattr(user, "l1_long_independent", False) else 1,
         )
-    else:
-        # Шаблон не найден — заглушка
-        rendered = RenderedWorkout(
-            title=f"Тренировка ({decision.version})",
-            text=T.checkin.no_template_fallback,
-            planned_minutes=day_plan.planned_minutes or 0,
+    elif day_plan.day_type == "strength":
+        template = await _get_workout_template(
+            session=session,
+            level=level,
+            period=week_plan.period,
+            day_type="strength",
+            run_subtype=None,
             version=decision.version,
+            strength_format=user.strength_format,
         )
+        if template:
+            rendered = render_strength_from_template(template, minutes, decision.version)
+        else:
+            rendered = RenderedWorkout(
+                title="Силовая тренировка",
+                text=T.checkin.no_template_fallback,
+                planned_minutes=minutes,
+                version=decision.version,
+            )
+    else:
+        rendered = render_rest_day()
 
     now = datetime.now(timezone.utc)
     user_is_admin = user_id in settings.admin_ids
