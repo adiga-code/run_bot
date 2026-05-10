@@ -1,5 +1,5 @@
 import logging
-from datetime import date
+from datetime import date, datetime
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -32,6 +32,8 @@ class AdminActionStates(StatesGroup):
     # Coach override (новая система)
     override_text = State()    # тренер пишет свой текст тренировки
     override_minutes = State() # тренер меняет количество минут
+    # Активация с произвольной датой
+    activate_on_date = State() # тренер вводит дату старта вручную
 
 router = Router()
 
@@ -1266,6 +1268,7 @@ async def _activate_user(
     user_id: int,
     level: int,
     start_today: bool,
+    custom_start_date: date | None = None,
 ) -> None:
     """Activate user with given level and start date."""
     from datetime import timedelta
@@ -1280,7 +1283,16 @@ async def _activate_user(
         await safe_answer(callback, text=T.admin.already_active, show_alert=True)
         return
 
-    start_date = date.today() if start_today else date.today() + timedelta(days=1)
+    if custom_start_date:
+        start_date = custom_start_date
+        start_label = start_date.strftime("%d.%m.%Y")
+    elif start_today:
+        start_date = date.today()
+        start_label = T.admin.start_today_word
+    else:
+        start_date = date.today() + timedelta(days=1)
+        start_label = T.admin.start_tomorrow_word
+
     await user_svc.update(user, level=level, status="active", program_start_date=start_date)
     # Перечитываем user после update (refresh)
     user = await user_svc.get_or_raise(user_id)
@@ -1290,21 +1302,16 @@ async def _activate_user(
         from services.week_plan_service import WeekPlanService
         wk_plan_svc = WeekPlanService(session)
         try:
-            await wk_plan_svc.create_first_week(user)
+            await wk_plan_svc.create_first_week(user, anchor_date=start_date)
             logger.info(
-                "Admin %s activated user %s (level=%s) — WeekPlan created",
-                callback.from_user.id, user_id, level,
+                "Admin %s activated user %s (level=%s, start=%s) — WeekPlan created",
+                callback.from_user.id, user_id, level, start_date,
             )
         except Exception:
             logger.exception("Failed to create WeekPlan for user %s on activation", user_id)
 
-        if start_today:
-            logger.info("Admin %s activated user %s with start_today (new system)", callback.from_user.id, user_id)
-        else:
-            logger.info("Admin %s activated user %s (start tomorrow, level=%s, new system)", callback.from_user.id, user_id, level)
-
     # ── Старая система (L4/L5 или current_period=None) ───────────────────────
-    elif start_today:
+    elif start_today and not custom_start_date:
         from database.models import SessionLog
         day1_log = SessionLog(
             user_id=user.telegram_id,
@@ -1315,10 +1322,9 @@ async def _activate_user(
         await session.commit()
         logger.info("Admin %s activated user %s with start_today; created Day 1 SessionLog", callback.from_user.id, user_id)
     else:
-        logger.info("Admin %s activated user %s (start tomorrow, level=%s)", callback.from_user.id, user_id, level)
+        logger.info("Admin %s activated user %s (start %s, level=%s)", callback.from_user.id, user_id, start_date, level)
 
     level_name = LEVEL_NAMES[level]
-    start_label = T.admin.start_today_word if start_today else T.admin.start_tomorrow_word
 
     await callback.message.edit_text(
         callback.message.text + f"\n\n" + T.admin.activated_label.format(
@@ -1330,20 +1336,20 @@ async def _activate_user(
     await safe_answer(callback)
 
     user_text = T.admin.user_activated_msg.format(level_name=level_name, start_label=start_label)
-    if start_today:
+    if start_today and not custom_start_date:
         user_text += T.admin.user_activated_today_suffix
     try:
         await callback.bot.send_message(
             chat_id=user_id,
             text=user_text,
             parse_mode="HTML",
-            reply_markup=kb_main_menu() if start_today else None,
+            reply_markup=kb_main_menu() if (start_today and not custom_start_date) else None,
         )
     except Exception:
         pass
 
 
-@router.callback_query(F.data.startswith("adm:approve:"))
+@router.callback_query(F.data.startswith("adm:approve:") & ~F.data.startswith("adm:approve:askdate:"))
 async def cb_approve(callback: CallbackQuery, session: AsyncSession) -> None:
     """adm:approve:today:<user_id>:<level> or adm:approve:tomorrow:<user_id>:<level>"""
     if not is_admin(callback.from_user.id):
@@ -1354,6 +1360,80 @@ async def cb_approve(callback: CallbackQuery, session: AsyncSession) -> None:
     start_today = parts[2] == "today"
     user_id, level = int(parts[3]), int(parts[4])
     await _activate_user(callback, session, user_id, level, start_today)
+
+
+@router.callback_query(F.data.startswith("adm:approve:askdate:"))
+async def cb_approve_ask_date(callback: CallbackQuery, state: FSMContext) -> None:
+    """adm:approve:askdate:<user_id>:<level> — ask admin for a custom start date."""
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+
+    parts = callback.data.split(":")
+    user_id, level = int(parts[3]), int(parts[4])
+    await state.set_state(AdminActionStates.activate_on_date)
+    await state.update_data(activate_user_id=user_id, activate_level=level)
+    await callback.message.answer(
+        "📅 Введи дату старта в формате <b>ДД.ММ.ГГГГ</b>\n"
+        "Например: <code>19.05.2026</code>\n\n"
+        "Неделя начнётся в ближайший понедельник от этой даты.",
+        parse_mode="HTML",
+    )
+    await safe_answer(callback)
+
+
+@router.message(AdminActionStates.activate_on_date)
+async def admin_activate_date_input(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        return
+
+    data = await state.get_data()
+    user_id = data.get("activate_user_id")
+    level = data.get("activate_level")
+
+    try:
+        custom_date = datetime.strptime(message.text.strip(), "%d.%m.%Y").date()
+    except (ValueError, AttributeError):
+        await message.answer("❌ Неверный формат. Введи дату как <b>ДД.ММ.ГГГГ</b>, например <code>19.05.2026</code>.", parse_mode="HTML")
+        return
+
+    await state.clear()
+
+    # Эмулируем CallbackQuery объект для переиспользования _activate_user
+    # Вместо этого — прямая активация без edit_text
+    from services.user_service import UserService
+    from services.week_plan_service import WeekPlanService
+
+    user_svc = UserService(session)
+    user = await user_svc.get(user_id)
+    if not user or user.status == "active":
+        await message.answer("⚠️ Пользователь не найден или уже активен.")
+        return
+
+    await user_svc.update(user, level=level, status="active", program_start_date=custom_date)
+    user = await user_svc.get_or_raise(user_id)
+
+    if level <= 3 and user.current_period is not None:
+        wk_plan_svc = WeekPlanService(session)
+        try:
+            await wk_plan_svc.create_first_week(user, anchor_date=custom_date)
+        except Exception:
+            logger.exception("Failed to create WeekPlan for user %s on activation", user_id)
+
+    level_name = LEVEL_NAMES[level]
+    start_label = custom_date.strftime("%d.%m.%Y")
+    await message.answer(
+        T.admin.activated_label.format(level_name=level_name, level=level, start_label=start_label),
+        parse_mode="HTML",
+    )
+    try:
+        await message.bot.send_message(
+            chat_id=user_id,
+            text=T.admin.user_activated_msg.format(level_name=level_name, start_label=start_label),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data.startswith("adm:pick:"))

@@ -632,6 +632,7 @@ def kb_admin_approve(user_id: int, level: int) -> InlineKeyboardMarkup:
         text=T.btn.adm_start_tomorrow_fmt.format(level=level, name=name),
         callback_data=f"adm:approve:tomorrow:{user_id}:{level}",
     )
+    builder.button(text="📅 На дату...", callback_data=f"adm:approve:askdate:{user_id}:{level}")
     builder.button(text=T.btn.adm_edit_level, callback_data=f"adm:pick:{user_id}")
     builder.adjust(1)
     return builder.as_markup()
@@ -642,7 +643,8 @@ def kb_admin_start_choice(user_id: int, level: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=T.btn.adm_start_today,    callback_data=f"adm:approve:today:{user_id}:{level}")
     builder.button(text=T.btn.adm_start_tomorrow, callback_data=f"adm:approve:tomorrow:{user_id}:{level}")
-    builder.adjust(2)
+    builder.button(text="📅 На дату...",           callback_data=f"adm:approve:askdate:{user_id}:{level}")
+    builder.adjust(2, 1)
     return builder.as_markup()
 
 
