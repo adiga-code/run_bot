@@ -92,7 +92,12 @@ async def _send_progress_new(target, user_id: int, session: AsyncSession) -> Non
     elif week_plan:
         week_ahead = "<i>Неделя завершена.</i>\n\n"
     else:
-        week_ahead = T.progress.no_week_plan
+        # Проверяем — есть ли будущий план (старт ещё не наступил)
+        next_plan = await wk_plan_svc.get_last(user_id)
+        if next_plan and next_plan.start_date > date.today():
+            week_ahead = f"📅 <i>Программа начнётся {next_plan.start_date.strftime('%-d %B')}.</i>\n\n"
+        else:
+            week_ahead = T.progress.no_week_plan
 
     # ── Доп. флаги ───────────────────────────────────────────────────────────
     extra_parts = []
