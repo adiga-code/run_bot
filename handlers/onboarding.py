@@ -71,6 +71,10 @@ class OnboardingStates(StatesGroup):
     q_location = State()
     # Блок 8 — самооценка
     q_self_level = State()
+    # Блок гаджеты (только сбор данных)
+    q_gadget = State()
+    q_gadget_types = State()
+    q_gadget_sharing = State()
 
 
 # ── Блок 1: Фамилия ───────────────────────────────────────────────────────────
@@ -651,15 +655,129 @@ async def step_q_location(callback: CallbackQuery, state: FSMContext) -> None:
     )
 
 
-# ── Блок 8: Самооценка → финал ────────────────────────────────────────────────
+# ── Блок 8: Самооценка → переход к гаджетам ──────────────────────────────────
 
 @router.callback_query(OnboardingStates.q_self_level, F.data.startswith("onb:self_lvl:"))
-async def step_q_self_level(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+async def step_q_self_level(callback: CallbackQuery, state: FSMContext) -> None:
     value = callback.data.split(":")[2]
     await state.update_data(q_self_level=value)
     await callback.message.edit_reply_markup()
     await safe_answer(callback)
+    await _ask_gadget(callback.message, state)
 
+
+async def _ask_gadget(target, state: FSMContext) -> None:
+    await state.set_state(OnboardingStates.q_gadget)
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Да, использую", callback_data="onb:gadget:yes")
+    builder.button(text="❌ Нет", callback_data="onb:gadget:no")
+    builder.adjust(1)
+    await target.answer(
+        "⌚ <b>Используешь ли ты гаджеты или трекеры для отслеживания активности?</b>\n\n"
+        "Например: Garmin, Apple Watch, Whoop, Oura, Polar и другие.",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup(),
+    )
+
+
+# ── Блок гаджеты: наличие трекера ─────────────────────────────────────────────
+
+@router.callback_query(OnboardingStates.q_gadget, F.data.startswith("onb:gadget:"))
+async def step_q_gadget(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    value = callback.data.split(":")[2]  # yes / no
+    await state.update_data(q_gadget=value)
+    await callback.message.edit_reply_markup()
+    await safe_answer(callback)
+
+    if value == "no":
+        # Skip gadget_types, go straight to finish with null gadget fields
+        await state.update_data(q_gadget_types=None, q_gadget_sharing=None)
+        await _finish_onboarding(callback, state, session)
+        return
+
+    # Ask which gadgets
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    for cb, label in [
+        ("whoop",       "💜 Whoop"),
+        ("garmin",      "🟢 Garmin"),
+        ("oura",        "🔵 Oura"),
+        ("apple_watch", "⌚ Apple Watch"),
+        ("polar",       "🔴 Polar"),
+        ("fitbit",      "🟠 Fitbit"),
+        ("other",       "📱 Другой"),
+    ]:
+        builder.button(text=label, callback_data=f"onb:gadget_type:{cb}")
+    builder.button(text="✅ Готово", callback_data="onb:gadget_type:done")
+    builder.adjust(2)
+    await state.set_state(OnboardingStates.q_gadget_types)
+    await state.update_data(q_gadget_types_list=[])
+    await callback.message.answer(
+        "Какие именно? Можно выбрать несколько, затем нажми <b>Готово</b>.",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup(),
+    )
+
+
+# ── Блок гаджеты: тип(ы) трекера (мультиселект) ──────────────────────────────
+
+@router.callback_query(OnboardingStates.q_gadget_types, F.data.startswith("onb:gadget_type:"))
+async def step_q_gadget_types(callback: CallbackQuery, state: FSMContext) -> None:
+    value = callback.data.split(":")[2]
+    await safe_answer(callback)
+
+    if value == "done":
+        data = await state.get_data()
+        types_list = data.get("q_gadget_types_list", [])
+        await state.update_data(q_gadget_types=",".join(types_list) if types_list else "other")
+        await callback.message.edit_reply_markup()
+        # Ask sharing
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+        builder.button(text="✅ Да, готов(а)", callback_data="onb:gadget_share:yes")
+        builder.button(text="⏳ Позже решу", callback_data="onb:gadget_share:later")
+        builder.button(text="❌ Нет", callback_data="onb:gadget_share:no")
+        builder.adjust(1)
+        await state.set_state(OnboardingStates.q_gadget_sharing)
+        await callback.message.answer(
+            "📊 <b>Готов(а) делиться данными с устройства внутри системы?</b>\n\n"
+            "Это поможет нам лучше настраивать тренировки под тебя.\n"
+            "<i>Пока мы только собираем данные — они не влияют на план.</i>",
+            parse_mode="HTML",
+            reply_markup=builder.as_markup(),
+        )
+        return
+
+    # Toggle selection
+    data = await state.get_data()
+    types_list = data.get("q_gadget_types_list", [])
+    if value in types_list:
+        types_list.remove(value)
+    else:
+        types_list.append(value)
+    await state.update_data(q_gadget_types_list=types_list)
+    await callback.answer(f"Выбрано: {len(types_list)}")
+
+
+# ── Блок гаджеты: шаринг данных ──────────────────────────────────────────────
+
+@router.callback_query(OnboardingStates.q_gadget_sharing, F.data.startswith("onb:gadget_share:"))
+async def step_q_gadget_sharing(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    value = callback.data.split(":")[2]  # yes / no / later
+    await state.update_data(q_gadget_sharing=value)
+    await callback.message.edit_reply_markup()
+    await safe_answer(callback)
+    await _finish_onboarding(callback, state, session)
+
+
+# ── Финал онбординга: сохранение и уведомление ───────────────────────────────
+
+async def _finish_onboarding(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    await _do_finish_onboarding(callback, state, session)
+
+
+async def _do_finish_onboarding(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     data = await state.get_data()
     await state.clear()
 
@@ -750,6 +868,10 @@ async def step_q_self_level(callback: CallbackQuery, state: FSMContext, session:
         available_weekdays=data.get("q_available_days", ""),
         # Блок 8
         q_self_level=data.get("q_self_level"),
+        # Блок гаджеты
+        q_gadget=data.get("q_gadget"),
+        q_gadget_types=data.get("q_gadget_types"),
+        q_gadget_sharing=data.get("q_gadget_sharing"),
         # ── Цикловая система (v2) ─────────────────────────────────────────────
         entry_point=entry_point,
         injury_return_active=injury_return,
@@ -775,6 +897,20 @@ async def step_q_self_level(callback: CallbackQuery, state: FSMContext, session:
         T.onb.admin_location_gym if location == "gym" else T.onb.admin_location_home
     )
 
+    # Gadget info for admin card
+    gadget_val = data.get("q_gadget")
+    gadget_block = ""
+    if gadget_val == "yes":
+        gadget_types = data.get("q_gadget_types") or "—"
+        gadget_sharing = data.get("q_gadget_sharing") or "—"
+        gadget_block = (
+            f"\n\n⌚ <b>Гаджеты:</b> Да\n"
+            f"Устройства: {gadget_types}\n"
+            f"Шаринг данных: {gadget_sharing}"
+        )
+    elif gadget_val == "no":
+        gadget_block = "\n\n⌚ <b>Гаджеты:</b> Нет"
+
     admin_text = T.onb.admin_notification.format(
         full_name=full_name,
         tg_link=tg_link,
@@ -799,7 +935,7 @@ async def step_q_self_level(callback: CallbackQuery, state: FSMContext, session:
         self_level=T.onb.self_level_labels.get(data.get("q_self_level", ""), "—"),
         level_name=level_names[level],
         level=level,
-    )
+    ) + gadget_block
 
     for admin_id in settings.admin_ids:
         try:
