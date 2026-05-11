@@ -105,7 +105,7 @@ def split_running_minutes(
 
     long_ratio = get_long_max_ratio(level, period, injury_return)
 
-    # ── Long ─────────────────────────────────────────────────────────────────
+    # ── Long ────────────────────────────────────────────────────────────────────────
     if level == 1 and not is_long_independent:
         # Стадия 1: long = min(avg × 1.3, target × 0.35)
         avg_run = weekly_target / n_run_days
@@ -124,7 +124,7 @@ def split_running_minutes(
 
     per_other = round_int(remaining / n_other)
 
-    # ── Тип остальных беговых ─────────────────────────────────────────────────
+    # ── Тип остальных беговых ───────────────────────────────────────────────────
     if level == 1:
         # L1: all easy / run-walk
         return {"long": long, "easy": per_other, "aerobic": 0, "recovery_run": 0}
@@ -234,7 +234,7 @@ def _layout_days(
     strength_min = _get_strength_minutes(level, period, injury_return)
     level_key = _get_level_key(level, injury_return)
 
-    # ── Определяем количество силовых ─────────────────────────────────────────
+    # ── Определяем количество силовых ───────────────────────────────────────────────────
     if level == 1:
         n_strength = 2 if n >= 5 else 1
     elif level == 2 or (level == 3 and injury_return):
@@ -243,14 +243,14 @@ def _layout_days(
         # L3 regular: всегда 2
         n_strength = 2
 
-    # ── Определяем количество беговых ─────────────────────────────────────────
+    # ── Определяем количество беговых ───────────────────────────────────────────────────
     # long занимает 1 день
     n_run_total = n - n_strength  # беговые дни (включая long)
     # Минимум 1 беговая кроме long
     if n_run_total < 1:
         n_run_total = 1
 
-    # ── Long → последний день ────────────────────────────────────────────────
+    # ── Long → последний день ──────────────────────────────────────────────────────────
     long_day = available[-1]
     slots[long_day] = DaySlot(
         day_of_week=long_day,
@@ -261,7 +261,7 @@ def _layout_days(
         is_key=True,
     )
 
-    # ── Остальные дни (не long) ───────────────────────────────────────────────
+    # ── Остальные дни (не long) ────────────────────────────────────────────────────────
     other_days = [d for d in available if d != long_day]
 
     # Собираем типы тренировок для оставшихся дней
@@ -293,7 +293,7 @@ def _layout_days(
                     run_subtypes[i] = "intervals"
                     break
 
-    # ── Раскладка: силовые и беговые по оставшимся дням ─────────────────────
+    # ── Раскладка: силовые и беговые по оставшимся дням ─────────────────
     # Избегаем ставить силовую за день до long
     pre_long_day = long_day - 1  # может не быть в available
     forbidden_strength = {pre_long_day} if pre_long_day in other_days else set()
@@ -319,14 +319,13 @@ def _layout_days(
     while len(strength_days) < n_strength and run_days:
         strength_days.append(run_days.pop(0))
 
-    # ── Заполняем слоты для силовых ───────────────────────────────────────────
+    # ── Заполняем слоты для силовых ───────────────────────────────────────────────
     key_strength_assigned = False
     for i, day in enumerate(strength_days):
         is_key = not key_strength_assigned
         key_strength_assigned = True
 
         if l3_combo and day in run_days:
-            # L3: совмещение с лёгким бегом — добавим после
             pass
 
         slots[day] = DaySlot(
@@ -338,7 +337,7 @@ def _layout_days(
             is_key=is_key,
         )
 
-    # ── Заполняем слоты для беговых ───────────────────────────────────────────
+    # ── Заполняем слоты для беговых ───────────────────────────────────────────────
     # Первая беговая (кроме long) — ключевая
     key_run_assigned = False
     for i, day in enumerate(run_days):
@@ -379,7 +378,7 @@ def _layout_days(
             is_key=is_key,
         )
 
-    # ── Дни без тренировки → rest ────────────────────────────────────────────
+    # ── Дни без тренировки → rest ──────────────────────────────────────────────
     all_days_in_week = set(range(1, 8))
     assigned_days = set(slots.keys())
     for day in all_days_in_week - assigned_days:
@@ -450,13 +449,20 @@ def build_week_plan(
 
 
 def _count_run_days(level: int, period: str, injury_return: bool, n_total: int) -> int:
-    """Количество беговых дней (включая long) для данного уровня."""
+    """
+    Количество беговых дней (включая long) для данного уровня.
+
+    Логика n_strength здесь точно повторяет _layout_days, чтобы
+    split_running_minutes делил объём на реальное число беговых дней.
+    """
     if level == 1:
-        return min(n_total, 3)
+        n_strength = 2 if n_total >= 5 else 1
+        return min(n_total - n_strength, 3)
     if level == 2 or (level == 3 and injury_return):
-        return min(n_total - 1, 4)  # 3-4 беговых + 1 силовая
-    # L3 regular: 4-5 беговых
-    return min(n_total - 2, 5)  # −2 силовых
+        n_strength = 2 if n_total >= 5 else 1
+        return min(n_total - n_strength, 4)
+    # L3 regular: всегда 2 силовых
+    return min(n_total - 2, 5)
 
 
 def parse_available_weekdays(s: str | None) -> list[int]:
