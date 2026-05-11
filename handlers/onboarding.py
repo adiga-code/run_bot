@@ -879,6 +879,7 @@ async def _do_finish_onboarding(callback: CallbackQuery, state: FSMContext, sess
         period_week_number=1 if program_mode == "new" else None,
         weekly_target_minutes=starting_volume if program_mode == "new" else None,
         has_goal_race=has_race_goal,
+        target_level=level if injury_return else None,
     )
 
     await callback.message.answer(T.onb.complete, parse_mode="HTML")
