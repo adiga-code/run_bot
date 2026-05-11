@@ -1066,11 +1066,18 @@ class T:
         err_code_exists  = "Ссылка с таким кодом уже существует. Введи другой код:"
         ask_name         = "Введи <b>название</b> ссылки (например: <i>Instagram июнь</i>):"
         err_name_empty   = "Название не может быть пустым."
-        # .format(name=..., code=..., bot_username=...)
+        ask_auto_approve = (
+            "Включить <b>авто-одобрение</b> для этой ссылки?\n\n"
+            "Если да — все, кто придут по ней, автоматически получат доступ к онбордингу без подтверждения тренера."
+        )
+        auto_approve_on  = "✅ авто-одобрение включено"
+        auto_approve_off = "✋ ручное одобрение"
+        # .format(name=..., code=..., bot_username=..., auto_approve_label=...)
         created = (
             "✅ <b>Ссылка создана!</b>\n\n"
             "Название: <b>{name}</b>\n"
-            "Ссылка: <code>t.me/{bot_username}?start=ref_{code}</code>"
+            "Ссылка: <code>t.me/{bot_username}?start=ref_{code}</code>\n"
+            "Одобрение: {auto_approve_label}"
         )
         # .format(name=...)
         deleted      = "✅ Ссылка <b>{name}</b> удалена."

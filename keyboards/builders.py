@@ -487,6 +487,14 @@ def kb_admin_referral_list(links: list) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def kb_ref_auto_approve_choice() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Да, авто-одобрение",  callback_data="adm:ref:new_approve:yes")
+    builder.button(text="✋ Нет, ручное одобрение", callback_data="adm:ref:new_approve:no")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def kb_admin_ref_detail(code: str, is_active: bool) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     toggle_text = T.btn.adm_ref_toggle_on if is_active else T.btn.adm_ref_toggle_off

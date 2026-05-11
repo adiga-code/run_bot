@@ -75,8 +75,19 @@ async def cb_welcome_trainings(callback: CallbackQuery, state: FSMContext, sessi
 
     wl_svc = WhitelistService(session)
     if not is_admin_user and not await wl_svc.is_allowed(user_id):
-        await callback.message.answer(T.start.not_allowed, reply_markup=kb_apply())
-        return
+        # Auto-approve if user came via a referral link with auto_approve=True
+        auto_approved = False
+        if user.referral_code:
+            from services.referral_service import ReferralService
+            ref_svc = ReferralService(session)
+            ref_link = await ref_svc.get_by_code(user.referral_code)
+            if ref_link and ref_link.is_active and ref_link.auto_approve:
+                await wl_svc.add(telegram_id=user_id, added_by=0, note=f"авто: {user.referral_code}")
+                auto_approved = True
+
+        if not auto_approved:
+            await callback.message.answer(T.start.not_allowed, reply_markup=kb_apply())
+            return
 
     user_svc = UserService(session)
     user, _ = await user_svc.get_or_create(
