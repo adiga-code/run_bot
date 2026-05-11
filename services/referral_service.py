@@ -10,11 +10,20 @@ class ReferralService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def create(self, name: str, admin_id: int) -> ReferralLink:
-        code = secrets.token_urlsafe(6)
-        while await self.get_by_code(code):
+    async def create(
+        self,
+        name: str,
+        admin_id: int | None = None,
+        created_by: int | None = None,
+        code: str | None = None,
+        auto_approve: bool = False,
+    ) -> ReferralLink:
+        actual_creator = admin_id or created_by or 0
+        if not code:
             code = secrets.token_urlsafe(6)
-        link = ReferralLink(code=code, name=name, created_by=admin_id)
+            while await self.get_by_code(code):
+                code = secrets.token_urlsafe(6)
+        link = ReferralLink(code=code, name=name, created_by=actual_creator, auto_approve=auto_approve)
         self.session.add(link)
         await self.session.commit()
         await self.session.refresh(link)

@@ -361,6 +361,7 @@ class ReferralLink(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     created_by: Mapped[int] = mapped_column(BigInteger, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    auto_approve: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 

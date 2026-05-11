@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from handlers.utils import safe_answer
-from keyboards.builders import kb_admin_menu, kb_admin_referral_detail, kb_admin_referral_list
+from keyboards.builders import kb_admin_menu, kb_admin_referral_detail, kb_admin_referral_list, kb_ref_auto_approve_choice
 from services.referral_service import ReferralService
 from texts import T
 
@@ -19,8 +19,9 @@ _CODE_RE = re.compile(r"^[a-zA-Z0-9_]{1,50}$")
 
 
 class ReferralStates(StatesGroup):
-    waiting_code = State()
-    waiting_name = State()
+    waiting_code         = State()
+    waiting_name         = State()
+    waiting_auto_approve = State()
 
 
 def is_admin(user_id: int) -> bool:
@@ -150,26 +151,37 @@ async def ref_input_code(message: Message, state: FSMContext, session: AsyncSess
 
 
 @router.message(ReferralStates.waiting_name)
-async def ref_input_name(message: Message, state: FSMContext, session: AsyncSession) -> None:
+async def ref_input_name(message: Message, state: FSMContext) -> None:
     name = message.text.strip() if message.text else ""
 
     if not name:
         await message.answer(T.referral.err_name_empty)
         return
 
+    await state.update_data(ref_name=name)
+    await state.set_state(ReferralStates.waiting_auto_approve)
+    await message.answer(T.referral.ask_auto_approve, parse_mode="HTML", reply_markup=kb_ref_auto_approve_choice())
+
+
+@router.callback_query(F.data.startswith("adm:ref:new_approve:"), ReferralStates.waiting_auto_approve)
+async def ref_choose_auto_approve(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    await safe_answer(callback)
+    auto_approve = callback.data.split(":")[-1] == "yes"
+
     data = await state.get_data()
     code = data.get("ref_code", "")
+    name = data.get("ref_name", "")
     await state.clear()
 
     svc = ReferralService(session)
-    link = await svc.create(code=code, name=name, created_by=message.from_user.id)
+    link = await svc.create(code=code, name=name, created_by=callback.from_user.id, auto_approve=auto_approve)
     if not link:
-        await message.answer(T.referral.err_code_exists)
+        await callback.message.answer(T.referral.err_code_exists)
         return
 
-    bot_username = await _get_bot_username(message)
-    await message.answer(
-        T.referral.created.format(name=name, code=code, bot_username=bot_username),
+    bot_username = await _get_bot_username(callback)
+    await callback.message.answer(
+        T.referral.created.format(name=name, code=code, bot_username=bot_username, auto_approve_label=T.referral.auto_approve_on if auto_approve else T.referral.auto_approve_off),
         parse_mode="HTML",
         reply_markup=kb_admin_referral_detail(code),
     )
@@ -232,7 +244,7 @@ async def cmd_ref_create(message: Message, session: AsyncSession) -> None:
 
     bot_username = await _get_bot_username(message)
     await message.answer(
-        T.referral.created.format(name=name, code=code, bot_username=bot_username),
+        T.referral.created.format(name=name, code=code, bot_username=bot_username, auto_approve_label=T.referral.auto_approve_off),
         parse_mode="HTML",
         reply_markup=kb_admin_referral_detail(code),
     )
