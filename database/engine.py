@@ -33,6 +33,8 @@ async def _run_alembic_migrations() -> None:
         from alembic import command
 
         alembic_cfg = Config("alembic.ini")
+        # Suppress noisy alembic startup lines
+        logging.getLogger("alembic.runtime.migration").setLevel(logging.WARNING)
         # Запускаем в отдельном потоке, т.к. Alembic sync API
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, lambda: command.upgrade(alembic_cfg, "head"))
