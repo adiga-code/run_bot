@@ -475,7 +475,7 @@ def kb_admin_referrals(links: list) -> InlineKeyboardMarkup:
     for link in links:
         icon = "✅" if link.is_active else "❌"
         builder.button(text=f"{icon} {link.name}", callback_data=f"adm:ref:view:{link.code}")
-    builder.button(text=T.btn.adm_ref_new, callback_data="adm:ref:new")
+    builder.button(text=T.btn.adm_ref_new, callback_data="adm:ref:create")
     builder.button(text=T.btn.back, callback_data="adm:menu:back")
     builder.adjust(1)
     return builder.as_markup()
