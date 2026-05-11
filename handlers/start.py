@@ -73,6 +73,12 @@ async def cb_welcome_trainings(callback: CallbackQuery, state: FSMContext, sessi
     user_id = callback.from_user.id
     is_admin_user = user_id in settings.admin_ids
 
+    user_svc = UserService(session)
+    user, _ = await user_svc.get_or_create(
+        telegram_id=user_id,
+        full_name=callback.from_user.full_name or "Участник",
+    )
+
     wl_svc = WhitelistService(session)
     if not is_admin_user and not await wl_svc.is_allowed(user_id):
         # Auto-approve if user came via a referral link with auto_approve=True
@@ -88,12 +94,6 @@ async def cb_welcome_trainings(callback: CallbackQuery, state: FSMContext, sessi
         if not auto_approved:
             await callback.message.answer(T.start.not_allowed, reply_markup=kb_apply())
             return
-
-    user_svc = UserService(session)
-    user, _ = await user_svc.get_or_create(
-        telegram_id=user_id,
-        full_name=callback.from_user.full_name or "Участник",
-    )
     await state.set_state(OnboardingStates.last_name)
     await callback.message.answer(T.start.onboarding_intro, parse_mode="HTML")
 
