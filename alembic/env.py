@@ -1,5 +1,5 @@
 import asyncio
-from logging.config import fileConfig
+import logging
 
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlalchemy import pool
@@ -9,8 +9,8 @@ from alembic import context
 # ── Alembic Config ────────────────────────────────────────────────────────────
 config = context.config
 
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name, disable_existing_loggers=False)
+# Don't let alembic reconfigure logging — the app sets up its own logging config
+logging.getLogger("alembic").setLevel(logging.WARNING)
 
 # ── Import models so autogenerate sees them ───────────────────────────────────
 from database.models import Base  # noqa: E402  (after sys.path setup)
