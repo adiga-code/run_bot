@@ -16,9 +16,14 @@ session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncS
 
 async def create_db() -> None:
     """Create initial tables (new installs only) and run Alembic migrations."""
-    # create_all создаёт таблицы только если их нет (безопасно для существующих БД)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Колонки добавленные без миграций — патчим напрямую через IF NOT EXISTS
+        for sql in (
+            "ALTER TABLE referral_links ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true",
+            "ALTER TABLE referral_links ADD COLUMN IF NOT EXISTS auto_approve BOOLEAN NOT NULL DEFAULT false",
+        ):
+            await conn.execute(text(sql))
     await _run_alembic_migrations()
 
 
