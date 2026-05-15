@@ -40,6 +40,52 @@ def _check_keyboard(payment_id: int) -> InlineKeyboardMarkup:
     ])
 
 
+@router.callback_query(lambda c: c.data == "pay:status")
+async def cb_pay_status(call: CallbackQuery, session: AsyncSession) -> None:
+    """Show current subscription status and payment options."""
+    from sqlalchemy import select as sa_select
+    from database.models import User as UserModel
+    from engine.access import get_access_status, trial_days_left, PLAN_PRICES
+    from datetime import date
+
+    result = await session.execute(sa_select(UserModel).where(UserModel.telegram_id == call.from_user.id))
+    user = result.scalar_one_or_none()
+    if not user:
+        await call.answer()
+        return
+
+    access = get_access_status(user)
+
+    if access == "free":
+        text = "🎁 У вас бесплатный доступ (амбассадор). Тренировки открыты без ограничений."
+        await call.message.answer(text)
+        await call.answer()
+        return
+
+    if access in ("trial", "trial_warning"):
+        days = trial_days_left(user)
+        text = (
+            f"⏳ Пробный период активен — осталось {days} дн.\n\n"
+            f"Оформите подписку, чтобы продолжить после окончания:\n"
+            f"• Месяц — {PLAN_PRICES['monthly']} ₽\n"
+            f"• Год — {PLAN_PRICES['annual']} ₽"
+        )
+    elif access == "active":
+        until = user.access_until.strftime("%d.%m.%Y") if user.access_until else "—"
+        plan = "Годовая" if user.subscription_type == "annual" else "Месячная"
+        text = f"✅ Подписка активна ({plan})\nДоступ до: {until}"
+    else:
+        text = (
+            f"🔒 Доступ истёк.\n\n"
+            f"Оформите подписку:\n"
+            f"• Месяц — {PLAN_PRICES['monthly']} ₽\n"
+            f"• Год — {PLAN_PRICES['annual']} ₽"
+        )
+
+    await call.message.answer(text, reply_markup=_plan_keyboard())
+    await call.answer()
+
+
 @router.callback_query(lambda c: c.data == "pay:choose_plan")
 async def cb_choose_plan(call: CallbackQuery) -> None:
     await call.message.answer(
