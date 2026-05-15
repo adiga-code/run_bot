@@ -138,7 +138,7 @@ def split_running_minutes(
             # At low L2 volume aerobic < recovery_run is not valid; skip recovery_run instead.
             if aerobic_min < rec_min:
                 aerobic_min = round_int(remaining / n_other)
-                return {"long": long, "easy": 0, "aerobic": aerobic_min, "recovery_run": 0}
+                return {"long": long, "easy": aerobic_min, "aerobic": 0, "recovery_run": 0}
             return {"long": long, "easy": 0, "aerobic": aerobic_min, "recovery_run": rec_min}
         return {"long": long, "easy": 0, "aerobic": per_other, "recovery_run": 0}
 
@@ -273,10 +273,12 @@ def _layout_days(
     if level == 1:
         run_subtypes = ["easy"] * (n_run_total - 1)
     elif level == 2 or (level == 3 and injury_return):
-        # 1 recovery_run + N-1 aerobic (если есть место)
+        # 1 recovery_run + N-1 aerobic; при низком объёме (easy > 0) — easy
         other_run = n_run_total - 1
         if other_run > 0 and minutes.get("recovery_run", 0) > 0:
             run_subtypes = ["recovery_run"] + ["aerobic"] * max(0, other_run - 1)
+        elif minutes.get("easy", 0) > 0:
+            run_subtypes = ["easy"] * other_run
         else:
             run_subtypes = ["aerobic"] * other_run
     else:
@@ -305,21 +307,50 @@ def _layout_days(
     strength_days: list[int] = []
     run_days: list[int] = []
 
-    # Стараемся разнести беговые и силовые
+    # Стараемся разнести тренировки одного типа: ≥ 1 день без бега между беговыми (если возможно)
     # L3 regular: разрешаем совмещение силовой + лёгкого бега
     l3_combo = (level == 3 and not injury_return)
 
+    last_run_day: int | None = None
     for i, day in enumerate(other_days):
-        # Не ставим силовую если предыдущий день тоже силовой
-        would_be_consecutive = strength_days and day == strength_days[-1] + 1
-        if (len(strength_days) < n_strength
-                and day not in forbidden_strength
-                and not would_be_consecutive):
-            strength_days.append(day)
-        else:
-            run_days.append(day)
+        days_remaining = len(other_days) - i
+        strength_still_needed = n_strength - len(strength_days)
+        run_still_needed = (n_run_total - 1) - len(run_days)
 
-    # Если силовых дней не хватает — добираем из run_days (уже без ограничения на смежность)
+        would_be_consecutive_strength = bool(strength_days) and day == strength_days[-1] + 1
+        would_be_consecutive_run = last_run_day is not None and day == last_run_day + 1
+
+        can_be_strength = (
+            strength_still_needed > 0
+            and day not in forbidden_strength
+            and not would_be_consecutive_strength
+        )
+        can_be_run_ideal = run_still_needed > 0 and not would_be_consecutive_run
+        # Вынужденная беговая: оставшихся дней ровно столько, сколько нужно беговых
+        must_be_run = run_still_needed > 0 and days_remaining <= run_still_needed
+
+        if must_be_run and strength_still_needed == 0:
+            run_days.append(day)
+            last_run_day = day
+        elif can_be_strength and can_be_run_ideal:
+            # Оба варианта без смежности — берём тот тип, которого нужно больше
+            if strength_still_needed >= run_still_needed:
+                strength_days.append(day)
+            else:
+                run_days.append(day)
+                last_run_day = day
+        elif can_be_strength:
+            strength_days.append(day)
+        elif can_be_run_ideal:
+            run_days.append(day)
+            last_run_day = day
+        elif strength_still_needed > 0 and day not in forbidden_strength:
+            strength_days.append(day)  # вынужденная смежная силовая
+        else:
+            run_days.append(day)  # вынужденная смежная беговая
+            last_run_day = day
+
+    # Если силовых дней не хватает — добираем из run_days (без ограничения на смежность)
     while len(strength_days) < n_strength and run_days:
         strength_days.append(run_days.pop(0))
 
