@@ -131,9 +131,16 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(20), default="athlete")  # athlete / admin (reserved)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
+    # ── Payment / access ──────────────────────────────────────────────────────
+    trial_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    access_until: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # trial / monthly / annual / ambassador / free
+    subscription_type: Mapped[str] = mapped_column(String(20), default="trial")
+
     # ── Relationships ─────────────────────────────────────────────────────────
     session_logs: Mapped[list["SessionLog"]] = relationship(back_populates="user")
     week_plans: Mapped[list["WeekPlan"]] = relationship(back_populates="user")
+    payments: Mapped[list["Payment"]] = relationship(back_populates="user")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -407,3 +414,25 @@ class WhitelistEntry(Base):
     added_by: Mapped[int] = mapped_column(BigInteger)
     note: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAYMENT
+# ══════════════════════════════════════════════════════════════════════════════
+
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    yookassa_id: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True)
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)  # rub
+    # monthly / annual
+    plan_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    # pending / succeeded / canceled
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    payment_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped["User"] = relationship(back_populates="payments")

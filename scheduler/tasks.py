@@ -696,4 +696,115 @@ def setup_scheduler(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -
         replace_existing=True,
     )
 
+    # 10:00 UTC: напоминания о триале и истечении доступа
+    scheduler.add_job(
+        _send_access_reminders,
+        CronTrigger(hour=10, minute=0),
+        args=[bot, session_maker],
+        id="access_reminders",
+        replace_existing=True,
+    )
+
     return scheduler
+
+
+async def _send_access_reminders(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> None:
+    """Send trial expiry and access expiry reminders."""
+    from datetime import timedelta
+    from sqlalchemy import select as sa_select, or_, and_
+    from database.models import User
+    from engine.access import TRIAL_DAYS
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    pay_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="💳 Оплатить доступ", callback_data="pay:choose_plan")
+    ]])
+
+    today = date.today()
+    trial_warn_date = today - timedelta(days=TRIAL_DAYS - 2)  # started 8 days ago → 2 left
+    trial_last_date = today - timedelta(days=TRIAL_DAYS - 1)  # started 9 days ago → 1 left
+    access_warn_3 = today + timedelta(days=3)
+    access_warn_1 = today + timedelta(days=1)
+
+    async with session_maker() as session:
+        # Trial: 2 days left
+        r = await session.execute(
+            sa_select(User).where(
+                User.onboarding_complete == True,
+                User.subscription_type == "trial",
+                User.trial_started_at.isnot(None),
+                User.trial_started_at.between(
+                    datetime.combine(trial_warn_date, datetime.min.time()).replace(tzinfo=timezone.utc),
+                    datetime.combine(trial_warn_date, datetime.max.time()).replace(tzinfo=timezone.utc),
+                ),
+            )
+        )
+        for u in r.scalars().all():
+            try:
+                await bot.send_message(
+                    u.telegram_id,
+                    "⚠️ Пробный период заканчивается через 2 дня.\n\n"
+                    "Оплатите доступ, чтобы продолжить тренировки без перерыва:",
+                    reply_markup=pay_kb,
+                )
+            except Exception:
+                pass
+
+        # Trial: last day
+        r = await session.execute(
+            sa_select(User).where(
+                User.onboarding_complete == True,
+                User.subscription_type == "trial",
+                User.trial_started_at.isnot(None),
+                User.trial_started_at.between(
+                    datetime.combine(trial_last_date, datetime.min.time()).replace(tzinfo=timezone.utc),
+                    datetime.combine(trial_last_date, datetime.max.time()).replace(tzinfo=timezone.utc),
+                ),
+            )
+        )
+        for u in r.scalars().all():
+            try:
+                await bot.send_message(
+                    u.telegram_id,
+                    "🔔 Сегодня последний день пробного периода.\n\n"
+                    "Оплатите сейчас — тренировки продолжатся без остановки:",
+                    reply_markup=pay_kb,
+                )
+            except Exception:
+                pass
+
+        # Paid access: 3 days left
+        r = await session.execute(
+            sa_select(User).where(
+                User.access_until == access_warn_3,
+                User.subscription_type.in_(["monthly", "annual"]),
+            )
+        )
+        for u in r.scalars().all():
+            try:
+                await bot.send_message(
+                    u.telegram_id,
+                    "📅 Доступ к программе заканчивается через 3 дня.\n\n"
+                    "Продлите подписку, чтобы не прерываться:",
+                    reply_markup=pay_kb,
+                )
+            except Exception:
+                pass
+
+        # Paid access: 1 day left
+        r = await session.execute(
+            sa_select(User).where(
+                User.access_until == access_warn_1,
+                User.subscription_type.in_(["monthly", "annual"]),
+            )
+        )
+        for u in r.scalars().all():
+            try:
+                await bot.send_message(
+                    u.telegram_id,
+                    "⏰ Завтра заканчивается доступ к программе.\n\n"
+                    "Продлите сегодня:",
+                    reply_markup=pay_kb,
+                )
+            except Exception:
+                pass
