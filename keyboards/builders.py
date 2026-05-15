@@ -725,6 +725,7 @@ def kb_main_menu(checkin_done: bool = False) -> InlineKeyboardMarkup:
     builder.button(text=T.btn.menu_progress,  callback_data="menu:progress")
     builder.button(text=T.btn.menu_reminders, callback_data="menu:reminders")
     builder.button(text=T.events.btn_events,  callback_data="ev:list")
+    builder.button(text="💳 Подписка",        callback_data="pay:status")
     builder.adjust(1)
     return builder.as_markup()
 

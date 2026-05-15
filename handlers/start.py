@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
+from engine.access import get_access_status, has_access, trial_days_left, PLAN_PRICES
 from handlers.onboarding import OnboardingStates
 from handlers.utils import safe_answer
 from keyboards.builders import kb_apply, kb_admin_application, kb_main_menu, kb_welcome
@@ -45,19 +46,35 @@ async def cmd_start(
     if ref_code and not user.referral_code:
         await user_svc.update(user, referral_code=ref_code)
 
-    # Active/completed users go straight to main menu
-    if user.onboarding_complete and user.status in ("active", "completed"):
+    # Onboarding complete — check access status
+    if user.onboarding_complete:
         await state.clear()
+        access = get_access_status(user)
+
+        if access == "expired":
+            from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+            await message.answer(
+                "🔒 Ваш пробный период завершён.\n\n"
+                f"Оформите подписку, чтобы продолжить тренировки:\n"
+                f"• Месяц — {PLAN_PRICES['monthly']} ₽\n"
+                f"• Год — {PLAN_PRICES['annual']} ₽",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="💳 Оформить подписку", callback_data="pay:choose_plan")
+                ]]),
+            )
+            return
+
+        name = (user.full_name or "").split()[0]
+        if access in ("trial", "trial_warning"):
+            days = trial_days_left(user)
+            trial_note = f"\n\n⏳ Пробный период: осталось {days} дн." if days is not None else ""
+        else:
+            trial_note = ""
+
         await message.answer(
-            T.start.welcome_back.format(name=user.full_name.split()[0]),
+            T.start.welcome_back.format(name=name) + trial_note,
             reply_markup=kb_main_menu(),
         )
-        return
-
-    # Pending (onboarding done, waiting for trainer) — show waiting message
-    if user.onboarding_complete and user.status == "pending":
-        await state.clear()
-        await message.answer(T.checkin.pending_trainer_cmd)
         return
 
     # Everyone else (new users, guests) — welcome screen with Мероприятия / Тренировки
