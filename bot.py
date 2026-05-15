@@ -11,7 +11,8 @@ from config import settings
 from database.engine import create_db, seed_workouts, session_maker
 from database.middleware import DatabaseMiddleware
 from database.whitelist_middleware import WhitelistMiddleware
-from handlers import admin, checkin, events, onboarding, progress, referral, reminders, start, workout, absence
+from database.access_middleware import AccessMiddleware
+from handlers import admin, checkin, events, onboarding, payment, progress, referral, reminders, start, workout, absence
 from scheduler.tasks import setup_scheduler
 
 # ================= LOGGING =================
@@ -54,11 +55,13 @@ async def main() -> None:
 
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Middleware
+    # Middleware (order matters: DB → Whitelist → Access)
     dp.update.middleware(DatabaseMiddleware(session_maker))
     dp.update.middleware(WhitelistMiddleware())
+    dp.update.middleware(AccessMiddleware())
 
     # Routers
+    dp.include_router(payment.router)
     dp.include_router(admin.router)
     dp.include_router(referral.router)
     dp.include_router(events.router)
