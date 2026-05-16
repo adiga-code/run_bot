@@ -60,6 +60,31 @@ def _parse_weekdays(available_weekdays: str) -> list[int]:
     return sorted(int(d) for d in available_weekdays.split(",") if d.strip())
 
 
+_IDEAL_RUN_DAYS = {
+    "l1": 3,  # L1: до 3 беговых
+    "l2": 3,  # L2 и L3-return: минимум 3 беговых
+    "l3": 5,  # L3 regular: до 5 беговых
+}
+_MAX_STRENGTH_DAYS = 2  # силовых не более 2 в любом случае
+
+
+def _run_strength_split(level: int, injury_return: bool, n: int) -> tuple[int, int]:
+    """
+    Возвращает (n_run_total, n_strength) по приоритету «бег первый».
+    Сначала занимаем беговые слоты по методике уровня,
+    силовые добавляем в оставшиеся дни (макс. 2).
+    """
+    if level == 3 and not injury_return:
+        ideal_run = _IDEAL_RUN_DAYS["l3"]
+    elif level == 1:
+        ideal_run = _IDEAL_RUN_DAYS["l1"]
+    else:
+        ideal_run = _IDEAL_RUN_DAYS["l2"]
+    n_run_total = max(1, min(ideal_run, n))
+    n_strength = min(_MAX_STRENGTH_DAYS, max(0, n - n_run_total))
+    return n_run_total, n_strength
+
+
 def _get_strength_minutes(level: int, period: str, injury_return: bool) -> int:
     """Длительность силовой тренировки в минутах."""
     if level == 1:
@@ -238,21 +263,8 @@ def _layout_days(
     strength_min = _get_strength_minutes(level, period, injury_return)
     level_key = _get_level_key(level, injury_return)
 
-    # ── Определяем количество силовых ──────────────────────────────────────────────────────────────────
-    if level == 1:
-        n_strength = 2 if n >= 5 else 1
-    elif level == 2 or (level == 3 and injury_return):
-        n_strength = 2 if n >= 5 else 1
-    else:
-        # L3 regular: всегда 2
-        n_strength = 2
-
-    # ── Определяем количество беговых ──────────────────────────────────────────────────────────────────
-    # long занимает 1 день
-    n_run_total = n - n_strength  # беговые дни (включая long)
-    # Минимум 1 беговая кроме long
-    if n_run_total < 1:
-        n_run_total = 1
+    # ── Беговые дни первичны, силовые заполняют остаток ────────────────────────────────────────────────
+    n_run_total, n_strength = _run_strength_split(level, injury_return, n)
 
     # ── Long → последний день ────────────────────────────────────────────────────────────────────────
     long_day = available[-1]
@@ -490,14 +502,8 @@ def _count_run_days(level: int, period: str, injury_return: bool, n_total: int) 
     Логика n_strength здесь точно повторяет _layout_days, чтобы
     split_running_minutes делил объём на реальное число беговых дней.
     """
-    if level == 1:
-        n_strength = 2 if n_total >= 5 else 1
-        return min(n_total - n_strength, 3)
-    if level == 2 or (level == 3 and injury_return):
-        n_strength = 2 if n_total >= 5 else 1
-        return min(n_total - n_strength, 4)
-    # L3 regular: всегда 2 силовых
-    return min(n_total - 2, 5)
+    n_run_total, _ = _run_strength_split(level, injury_return, n_total)
+    return n_run_total
 
 
 def parse_available_weekdays(s: str | None) -> list[int]:
