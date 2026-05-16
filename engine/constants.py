@@ -106,6 +106,8 @@ L2_STRENGTH_MINUTES: dict[str, int] = {
 
 L2_LONG_MAX_RATIO: float = 0.35        # ≤ 35% недели и ≤ потолка × 0.35
 
+AEROBIC_LONG_MIN_GAP: int = 5          # минут: aerobic должен быть короче long минимум на столько
+
 L2_ZONE_DISTRIBUTION: dict[str, float] = {
     "z1_z2": 0.75, "z3": 0.20, "z4": 0.05,
 }
@@ -247,6 +249,19 @@ L2_RETURN_RUN_WALK_ALLOWED: bool = True
 # ═════════════════════════════════════════════════════════════════════════════
 # RECOVERY PERIOD (multi-week) — только L1 и L3 regular
 # ═════════════════════════════════════════════════════════════════════════════
+
+# ═════════════════════════════════════════════════════════════════════════════
+# INJURY RETURN — вводный период (первые недели после перерыва)
+# ═════════════════════════════════════════════════════════════════════════════
+
+INJURY_RETURN_INTRO_WEEKS: int = 2          # первые N недель injury_return: только лёгкий бег
+INJURY_RETURN_INTRO_LONG_RATIO: float = 0.30  # укороченный long (вместо обычных 0.35)
+
+
+def is_injury_return_intro(injury_return: bool, program_week_number: int) -> bool:
+    """True, если это первые INJURY_RETURN_INTRO_WEEKS недели возврата после перерыва."""
+    return injury_return and 1 <= program_week_number <= INJURY_RETURN_INTRO_WEEKS
+
 
 RECOVERY_PERIOD_MULTIPLIER: float = 0.60
 RECOVERY_PERIOD_MIN_WEEKS_L1: int = 2

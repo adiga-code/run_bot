@@ -19,6 +19,9 @@ from engine.constants import (
     INTENSITY_NO_PAIN_RECENT_WEEKS, INTENSITY_LIGHT_LIMIT_4WEEKS,
     INTENSITY_RECOVERY_LIMIT_4WEEKS, L1_INTENSITY_MIN_WEEK_OF_PROGRAM,
     L2_INTERVALS_AFTER_SUCCESS_WEEKS,
+    AEROBIC_LONG_MIN_GAP,
+    INJURY_RETURN_INTRO_LONG_RATIO,
+    is_injury_return_intro,
     get_long_max_ratio, round_int,
 )
 
@@ -120,6 +123,7 @@ def split_running_minutes(
     n_run_days: int,
     is_long_independent: bool,
     is_recovery_week: bool,
+    program_week_number: int = 0,
 ) -> dict[str, int]:
     """
     Разбивает недельный объём бега по типам.
@@ -149,6 +153,13 @@ def split_running_minutes(
 
     per_other = round_int(remaining / n_other)
 
+    # ── Вводный период injury_return: только лёгкий бег, укороченный long ────────────────────────
+    if is_injury_return_intro(injury_return, program_week_number):
+        long = round_int(weekly_target * INJURY_RETURN_INTRO_LONG_RATIO)
+        long = min(long, weekly_target)
+        per_other = round_int((weekly_target - long) / n_other)
+        return {"long": long, "easy": per_other, "aerobic": 0, "recovery_run": 0}
+
     # ── Тип остальных беговых ──────────────────────────────────────────────────────────────────────
     if level == 1:
         # L1: all easy / run-walk
@@ -164,6 +175,11 @@ def split_running_minutes(
             if aerobic_min < rec_min:
                 aerobic_min = round_int(remaining / n_other)
                 return {"long": long, "easy": aerobic_min, "aerobic": 0, "recovery_run": 0}
+            # Enforce hierarchy: aerobic must be shorter than long.
+            if aerobic_min >= long:
+                excess = aerobic_min - long + AEROBIC_LONG_MIN_GAP
+                long += excess
+                aerobic_min -= excess
             return {"long": long, "easy": 0, "aerobic": aerobic_min, "recovery_run": rec_min}
         return {"long": long, "easy": 0, "aerobic": per_other, "recovery_run": 0}
 
@@ -171,6 +187,11 @@ def split_running_minutes(
     rec_min = L3_REGULAR_RECOVERY_RUN_MINUTES
     if n_other >= 2:
         aerobic_min = round_int((remaining - rec_min) / (n_other - 1))
+        # Enforce hierarchy: aerobic must be shorter than long.
+        if aerobic_min >= long:
+            excess = aerobic_min - long + AEROBIC_LONG_MIN_GAP
+            long += excess
+            aerobic_min -= excess
         return {"long": long, "easy": 0, "aerobic": aerobic_min, "recovery_run": rec_min}
     return {"long": long, "easy": 0, "aerobic": 0, "recovery_run": per_other}
 
@@ -202,6 +223,10 @@ def can_add_intensity(
     level_key = _get_level_key(level, injury_return)
     max_per_week = MAX_INTENSITY_PER_WEEK.get((level_key, period), 0)
     if max_per_week == 0:
+        return False
+
+    # injury_return intro: интенсивность запрещена в первые недели возврата
+    if is_injury_return_intro(injury_return, program_week_number):
         return False
 
     # L1 base: не раньше 8-й недели
@@ -476,6 +501,7 @@ def build_week_plan(
         n_run_days=n_run_days,
         is_long_independent=is_long_independent,
         is_recovery_week=is_recovery_week,
+        program_week_number=week_number,
     )
 
     days = _layout_days(
