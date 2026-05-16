@@ -497,3 +497,130 @@ class TestCanAddIntensity:
             recent_weeks=self._good_weeks(3),
         )
         assert ok is False
+
+    def test_injury_return_intro_blocks_intensity(self):
+        """injury_return + первые 2 недели → интенсивность запрещена."""
+        for week in (1, 2):
+            ok = can_add_intensity(
+                level=2, period="base", injury_return=True,
+                program_week_number=week, growth_streak=5,
+                recent_weeks=self._good_weeks(4),
+            )
+            assert ok is False, f"week {week} should block intensity"
+
+    def test_injury_return_week3_allows_intensity_if_eligible(self):
+        """injury_return + неделя 3+ → интенсивность может быть разрешена (если остальные условия ок)."""
+        ok = can_add_intensity(
+            level=2, period="base", injury_return=True,
+            program_week_number=3, growth_streak=5,
+            recent_weeks=self._good_weeks(4),
+        )
+        # week 3 выходит за пределы intro → не блокируется введённым правилом
+        # (хотя может блокироваться growth_streak < 3, но здесь streak=5 ≥ 3)
+        assert ok is True
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Иерархия длительностей: recovery < aerobic < long
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestDurationHierarchy:
+
+    def _split(self, target: int, n_run: int, level: int = 2,
+               injury_return: bool = False, period: str = "base") -> dict:
+        return split_running_minutes(
+            weekly_target=target,
+            level=level,
+            period=period,
+            injury_return=injury_return,
+            n_run_days=n_run,
+            is_long_independent=False,
+            is_recovery_week=False,
+            program_week_number=5,  # вне intro-периода
+        )
+
+    def test_l2_low_volume_hierarchy(self):
+        """L2 150 мин 3 беговых: aerobic < long (бывший баг Anna)."""
+        mins = self._split(150, 3)
+        assert mins["recovery_run"] > 0
+        assert mins["aerobic"] < mins["long"], (
+            f"aerobic={mins['aerobic']} должен быть < long={mins['long']}"
+        )
+
+    def test_l2_hierarchy_across_volumes(self):
+        """L2: иерархия recovery < aerobic < long при разных объёмах."""
+        for target in (150, 170, 200, 240):
+            mins = self._split(target, 3)
+            rec = mins.get("recovery_run", 0)
+            aer = mins.get("aerobic", 0)
+            lng = mins["long"]
+            if rec > 0 and aer > 0:
+                assert rec < aer < lng, (
+                    f"target={target}: ожидали rec<aer<long, получили {rec}<{aer}<{lng}"
+                )
+
+    def test_l2_total_minutes_preserved_after_hierarchy_fix(self):
+        """После коррекции иерархии сумма минут = weekly_target."""
+        mins = self._split(150, 3)
+        total = mins["long"] + mins.get("recovery_run", 0) + mins.get("aerobic", 0)
+        assert total == 150
+
+    def test_l3_return_hierarchy(self):
+        """L3 after break 200 мин 4 беговых: aerobic < long."""
+        mins = self._split(200, 4, level=3, injury_return=True)
+        aer = mins.get("aerobic", 0)
+        lng = mins["long"]
+        if aer > 0:
+            assert aer < lng, f"L3 return: aerobic={aer} должен быть < long={lng}"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# injury_return intro: укороченный long, только easy
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestInjuryReturnIntro:
+
+    def _split_intro(self, target: int, n_run: int, week: int = 1,
+                     level: int = 2) -> dict:
+        return split_running_minutes(
+            weekly_target=target,
+            level=level,
+            period="base",
+            injury_return=True,
+            n_run_days=n_run,
+            is_long_independent=False,
+            is_recovery_week=False,
+            program_week_number=week,
+        )
+
+    def test_intro_weeks_1_and_2_return_easy_only(self):
+        """Недели 1-2 injury_return: только easy, нет aerobic/recovery_run."""
+        for week in (1, 2):
+            mins = self._split_intro(180, 3, week=week)
+            assert mins.get("aerobic", 0) == 0
+            assert mins.get("recovery_run", 0) == 0
+            assert mins.get("easy", 0) > 0
+
+    def test_intro_long_ratio_30pct(self):
+        """Вводный период: long ≤ 30% от target."""
+        mins = self._split_intro(180, 3, week=1)
+        assert mins["long"] <= round(180 * 0.30) + 1
+
+    def test_week3_not_intro(self):
+        """Неделя 3 — вне intro: возвращает aerobic/recovery_run как обычно."""
+        mins = self._split_intro(200, 4, week=3)
+        assert mins.get("recovery_run", 0) > 0 or mins.get("aerobic", 0) > 0
+
+    def test_non_injury_return_unaffected(self):
+        """injury_return=False: intro не применяется даже на неделе 1."""
+        mins = split_running_minutes(
+            weekly_target=200,
+            level=2,
+            period="base",
+            injury_return=False,
+            n_run_days=4,
+            is_long_independent=False,
+            is_recovery_week=False,
+            program_week_number=1,
+        )
+        assert mins.get("recovery_run", 0) > 0 or mins.get("aerobic", 0) > 0

@@ -19,6 +19,9 @@ from engine.constants import (
     INTENSITY_NO_PAIN_RECENT_WEEKS, INTENSITY_LIGHT_LIMIT_4WEEKS,
     INTENSITY_RECOVERY_LIMIT_4WEEKS, L1_INTENSITY_MIN_WEEK_OF_PROGRAM,
     L2_INTERVALS_AFTER_SUCCESS_WEEKS,
+    AEROBIC_LONG_MIN_GAP,
+    INJURY_RETURN_INTRO_LONG_RATIO,
+    is_injury_return_intro,
     get_long_max_ratio, round_int,
 )
 
@@ -60,6 +63,31 @@ def _parse_weekdays(available_weekdays: str) -> list[int]:
     return sorted(int(d) for d in available_weekdays.split(",") if d.strip())
 
 
+_IDEAL_RUN_DAYS = {
+    "l1": 3,  # L1: до 3 беговых
+    "l2": 3,  # L2 и L3-return: минимум 3 беговых
+    "l3": 5,  # L3 regular: до 5 беговых
+}
+_MAX_STRENGTH_DAYS = 2  # силовых не более 2 в любом случае
+
+
+def _run_strength_split(level: int, injury_return: bool, n: int) -> tuple[int, int]:
+    """
+    Возвращает (n_run_total, n_strength) по приоритету «бег первый».
+    Сначала занимаем беговые слоты по методике уровня,
+    силовые добавляем в оставшиеся дни (макс. 2).
+    """
+    if level == 3 and not injury_return:
+        ideal_run = _IDEAL_RUN_DAYS["l3"]
+    elif level == 1:
+        ideal_run = _IDEAL_RUN_DAYS["l1"]
+    else:
+        ideal_run = _IDEAL_RUN_DAYS["l2"]
+    n_run_total = max(1, min(ideal_run, n))
+    n_strength = min(_MAX_STRENGTH_DAYS, max(0, n - n_run_total))
+    return n_run_total, n_strength
+
+
 def _get_strength_minutes(level: int, period: str, injury_return: bool) -> int:
     """Длительность силовой тренировки в минутах."""
     if level == 1:
@@ -95,6 +123,7 @@ def split_running_minutes(
     n_run_days: int,
     is_long_independent: bool,
     is_recovery_week: bool,
+    program_week_number: int = 0,
 ) -> dict[str, int]:
     """
     Разбивает недельный объём бега по типам.
@@ -124,6 +153,13 @@ def split_running_minutes(
 
     per_other = round_int(remaining / n_other)
 
+    # ── Вводный период injury_return: только лёгкий бег, укороченный long ────────────────────────
+    if is_injury_return_intro(injury_return, program_week_number):
+        long = round_int(weekly_target * INJURY_RETURN_INTRO_LONG_RATIO)
+        long = min(long, weekly_target)
+        per_other = round_int((weekly_target - long) / n_other)
+        return {"long": long, "easy": per_other, "aerobic": 0, "recovery_run": 0}
+
     # ── Тип остальных беговых ──────────────────────────────────────────────────────────────────────
     if level == 1:
         # L1: all easy / run-walk
@@ -139,6 +175,11 @@ def split_running_minutes(
             if aerobic_min < rec_min:
                 aerobic_min = round_int(remaining / n_other)
                 return {"long": long, "easy": aerobic_min, "aerobic": 0, "recovery_run": 0}
+            # Enforce hierarchy: aerobic must be shorter than long.
+            if aerobic_min >= long:
+                excess = aerobic_min - long + AEROBIC_LONG_MIN_GAP
+                long += excess
+                aerobic_min -= excess
             return {"long": long, "easy": 0, "aerobic": aerobic_min, "recovery_run": rec_min}
         return {"long": long, "easy": 0, "aerobic": per_other, "recovery_run": 0}
 
@@ -146,6 +187,11 @@ def split_running_minutes(
     rec_min = L3_REGULAR_RECOVERY_RUN_MINUTES
     if n_other >= 2:
         aerobic_min = round_int((remaining - rec_min) / (n_other - 1))
+        # Enforce hierarchy: aerobic must be shorter than long.
+        if aerobic_min >= long:
+            excess = aerobic_min - long + AEROBIC_LONG_MIN_GAP
+            long += excess
+            aerobic_min -= excess
         return {"long": long, "easy": 0, "aerobic": aerobic_min, "recovery_run": rec_min}
     return {"long": long, "easy": 0, "aerobic": 0, "recovery_run": per_other}
 
@@ -177,6 +223,10 @@ def can_add_intensity(
     level_key = _get_level_key(level, injury_return)
     max_per_week = MAX_INTENSITY_PER_WEEK.get((level_key, period), 0)
     if max_per_week == 0:
+        return False
+
+    # injury_return intro: интенсивность запрещена в первые недели возврата
+    if is_injury_return_intro(injury_return, program_week_number):
         return False
 
     # L1 base: не раньше 8-й недели
@@ -238,21 +288,8 @@ def _layout_days(
     strength_min = _get_strength_minutes(level, period, injury_return)
     level_key = _get_level_key(level, injury_return)
 
-    # ── Определяем количество силовых ──────────────────────────────────────────────────────────────────
-    if level == 1:
-        n_strength = 2 if n >= 5 else 1
-    elif level == 2 or (level == 3 and injury_return):
-        n_strength = 2 if n >= 5 else 1
-    else:
-        # L3 regular: всегда 2
-        n_strength = 2
-
-    # ── Определяем количество беговых ──────────────────────────────────────────────────────────────────
-    # long занимает 1 день
-    n_run_total = n - n_strength  # беговые дни (включая long)
-    # Минимум 1 беговая кроме long
-    if n_run_total < 1:
-        n_run_total = 1
+    # ── Беговые дни первичны, силовые заполняют остаток ────────────────────────────────────────────────
+    n_run_total, n_strength = _run_strength_split(level, injury_return, n)
 
     # ── Long → последний день ────────────────────────────────────────────────────────────────────────
     long_day = available[-1]
@@ -464,6 +501,7 @@ def build_week_plan(
         n_run_days=n_run_days,
         is_long_independent=is_long_independent,
         is_recovery_week=is_recovery_week,
+        program_week_number=week_number,
     )
 
     days = _layout_days(
@@ -490,14 +528,8 @@ def _count_run_days(level: int, period: str, injury_return: bool, n_total: int) 
     Логика n_strength здесь точно повторяет _layout_days, чтобы
     split_running_minutes делил объём на реальное число беговых дней.
     """
-    if level == 1:
-        n_strength = 2 if n_total >= 5 else 1
-        return min(n_total - n_strength, 3)
-    if level == 2 or (level == 3 and injury_return):
-        n_strength = 2 if n_total >= 5 else 1
-        return min(n_total - n_strength, 4)
-    # L3 regular: всегда 2 силовых
-    return min(n_total - 2, 5)
+    n_run_total, _ = _run_strength_split(level, injury_return, n_total)
+    return n_run_total
 
 
 def parse_available_weekdays(s: str | None) -> list[int]:
