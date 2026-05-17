@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 async def _reactivate_extended_users(bot: Bot, session_maker: async_sessionmaker[AsyncSession]) -> None:
     """
     Reactivates users with extended_week5=True who were marked 'completed' early
-    but still have days remaining in the extended program (up to day 42).
+    but still have days remaining in the extended program (up to day 84).
     Runs once on bot startup and then nightly as part of _create_daily_logs.
     """
     from sqlalchemy import select as sa_select

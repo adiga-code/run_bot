@@ -54,8 +54,8 @@ class UserService:
         return user
 
     def _max_day(self, user: User) -> int:
-        """Returns the maximum program day for this user (28 or 56 if extended weeks are activated)."""
-        return 56 if getattr(user, "extended_week5", False) else 28
+        """Returns the maximum program day for this user (28 or 84 if extended weeks are activated)."""
+        return 84 if getattr(user, "extended_week5", False) else 28
 
     async def current_calendar_day(self, user: User) -> int | None:
         """
@@ -109,7 +109,7 @@ class UserService:
         """Returns (week_start_day, week_end_day) for the given day_index."""
         week_num = (day_index - 1) // 7          # 0-based week number
         start = week_num * 7 + 1
-        end = min(start + 6, 28)
+        end = start + 6
         return start, end
 
     # ── Новая цикловая система ────────────────────────────────────────────────
