@@ -14,7 +14,7 @@ from engine.access import get_access_status, trial_days_left
 
 # Commands / callbacks always allowed regardless of payment status
 _ALWAYS_ALLOWED_COMMANDS = {"/start"}
-_ALWAYS_ALLOWED_PREFIXES = ("pay:", "payment:")
+_ALWAYS_ALLOWED_PREFIXES = ("pay:", "payment:", "mat:")
 
 
 def _is_allowed_without_payment(event: TelegramObject) -> bool:
