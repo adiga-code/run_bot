@@ -450,8 +450,8 @@ class Material(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # "free" | "premium"
     category:    Mapped[str]      = mapped_column(String(20), nullable=False, default="free")
-    # Informational price label, e.g. "590 ₽" — not charged per-item
     price_label: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    price_rub:   Mapped[int | None] = mapped_column(Integer, nullable=True)  # RUB, None = free
     # Telegram CDN reference
     file_id:     Mapped[str]      = mapped_column(String(500), nullable=False)
     file_name:   Mapped[str | None] = mapped_column(String(300), nullable=True)
@@ -461,3 +461,16 @@ class Material(Base):
     created_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     __table_args__ = (Index("ix_materials_category_order", "category", "sort_order"),)
+
+
+class MaterialPurchase(Base):
+    __tablename__ = "material_purchases"
+
+    id:           Mapped[int]           = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id:      Mapped[int]           = mapped_column(BigInteger, ForeignKey("users.telegram_id"), nullable=False)
+    material_id:  Mapped[int]           = mapped_column(Integer, ForeignKey("materials.id"), nullable=False)
+    yookassa_id:  Mapped[str | None]    = mapped_column(String(100), unique=True, nullable=True)
+    amount:       Mapped[int]           = mapped_column(Integer, nullable=False)
+    status:       Mapped[str]           = mapped_column(String(20), nullable=False, default="pending")
+    created_at:   Mapped[datetime]      = mapped_column(DateTime(timezone=True), default=_utcnow)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

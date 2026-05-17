@@ -71,6 +71,14 @@ class AccessMiddleware(BaseMiddleware):
         if not user.onboarding_complete:
             return await handler(event, data)
 
+        # User finished onboarding but awaiting admin decision (trial or payment)
+        if user.status == "pending":
+            if isinstance(event, Message):
+                await event.answer("⏳ Ваша заявка на рассмотрении. Мы скоро свяжемся с вами!")
+            elif isinstance(event, CallbackQuery):
+                await event.answer("Ждём одобрения заявки", show_alert=True)
+            return
+
         status = get_access_status(user)
 
         if status == "trial_warning":

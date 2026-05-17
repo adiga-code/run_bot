@@ -657,6 +657,36 @@ def kb_admin_start_choice(user_id: int, level: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def kb_admin_payment_invite() -> InlineKeyboardMarkup:
+    """Payment plan buttons sent to user when admin chooses 'to payment'."""
+    from engine.access import PLAN_PRICES
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"📅 Месяц — {PLAN_PRICES['monthly']} ₽ (28 дней)",
+            callback_data="pay:plan:monthly",
+        )],
+        [InlineKeyboardButton(
+            text=f"🔥 Год — {PLAN_PRICES['annual']} ₽ (365 дней)",
+            callback_data="pay:plan:annual",
+        )],
+    ])
+
+
+def kb_admin_access_choice(user_id: int, level: int, start_mode: str) -> InlineKeyboardMarkup:
+    """Shown after admin selects start date — choose trial or payment."""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=T.btn.adm_trial,
+        callback_data=f"adm:access:trial:{start_mode}:{user_id}:{level}",
+    )
+    builder.button(
+        text=T.btn.adm_to_payment,
+        callback_data=f"adm:access:payment:{start_mode}:{user_id}:{level}",
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def kb_admin_level_picker(user_id: int) -> InlineKeyboardMarkup:
     """Level selector for admin to override auto-detected level."""
     level_names = {1: "Start", 2: "Return", 3: "Base", 4: "Stability", 5: "Performance"}
