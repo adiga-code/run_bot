@@ -14,7 +14,7 @@ from engine.access import get_access_status, trial_days_left
 
 # Commands / callbacks always allowed regardless of payment status
 _ALWAYS_ALLOWED_COMMANDS = {"/start"}
-_ALWAYS_ALLOWED_PREFIXES = ("pay:", "payment:")
+_ALWAYS_ALLOWED_PREFIXES = ("pay:", "payment:", "mat:")
 
 
 def _is_allowed_without_payment(event: TelegramObject) -> bool:
@@ -70,6 +70,14 @@ class AccessMiddleware(BaseMiddleware):
         # Allow non-complete onboarding through
         if not user.onboarding_complete:
             return await handler(event, data)
+
+        # User finished onboarding but awaiting admin decision (trial or payment)
+        if user.status == "pending":
+            if isinstance(event, Message):
+                await event.answer("⏳ Ваша заявка на рассмотрении. Мы скоро свяжемся с вами!")
+            elif isinstance(event, CallbackQuery):
+                await event.answer("Ждём одобрения заявки", show_alert=True)
+            return
 
         status = get_access_status(user)
 

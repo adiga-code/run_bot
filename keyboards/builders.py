@@ -405,7 +405,8 @@ def kb_welcome() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=T.events.btn_events,    callback_data="ev:list")
     builder.button(text=T.events.btn_trainings, callback_data="ev:trainings")
-    builder.adjust(2)
+    builder.button(text=T.mat.btn_menu,         callback_data="mat:menu")
+    builder.adjust(2, 1)
     return builder.as_markup()
 
 
@@ -656,6 +657,36 @@ def kb_admin_start_choice(user_id: int, level: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def kb_admin_payment_invite() -> InlineKeyboardMarkup:
+    """Payment plan buttons sent to user when admin chooses 'to payment'."""
+    from engine.access import PLAN_PRICES
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"📅 Месяц — {PLAN_PRICES['monthly']} ₽ (28 дней)",
+            callback_data="pay:plan:monthly",
+        )],
+        [InlineKeyboardButton(
+            text=f"🔥 Год — {PLAN_PRICES['annual']} ₽ (365 дней)",
+            callback_data="pay:plan:annual",
+        )],
+    ])
+
+
+def kb_admin_access_choice(user_id: int, level: int, start_mode: str) -> InlineKeyboardMarkup:
+    """Shown after admin selects start date — choose trial or payment."""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=T.btn.adm_trial,
+        callback_data=f"adm:access:trial:{start_mode}:{user_id}:{level}",
+    )
+    builder.button(
+        text=T.btn.adm_to_payment,
+        callback_data=f"adm:access:payment:{start_mode}:{user_id}:{level}",
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def kb_admin_level_picker(user_id: int) -> InlineKeyboardMarkup:
     """Level selector for admin to override auto-detected level."""
     level_names = {1: "Start", 2: "Return", 3: "Base", 4: "Stability", 5: "Performance"}
@@ -725,6 +756,7 @@ def kb_main_menu(checkin_done: bool = False) -> InlineKeyboardMarkup:
     builder.button(text=T.btn.menu_progress,  callback_data="menu:progress")
     builder.button(text=T.btn.menu_reminders, callback_data="menu:reminders")
     builder.button(text=T.events.btn_events,  callback_data="ev:list")
+    builder.button(text=T.mat.btn_menu,       callback_data="mat:menu")
     builder.button(text="💳 Подписка",        callback_data="pay:status")
     builder.adjust(1)
     return builder.as_markup()
@@ -744,5 +776,32 @@ def kb_reschedule() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=T.btn.reschedule, callback_data="wk:reschedule")
     builder.button(text=T.btn.keep,       callback_data="wk:keep")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+# ── Materials ────────────────────────────────────────────────────────────────
+
+def kb_materials_menu() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text=T.mat.btn_base,    callback_data="mat:section:free")
+    builder.button(text=T.mat.btn_premium, callback_data="mat:section:premium")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_materials_list(materials: list, back_callback: str = "mat:menu") -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for m in materials:
+        icon = "🖼" if (m.file_type or "").startswith("image") else "📄"
+        builder.button(text=f"{icon} {m.title}", callback_data=f"mat:get:{m.id}")
+    builder.button(text=T.btn.back, callback_data=back_callback)
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def kb_material_back(section_callback: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text=T.btn.back, callback_data=section_callback)
     builder.adjust(1)
     return builder.as_markup()

@@ -840,8 +840,6 @@ async def _do_finish_onboarding(callback: CallbackQuery, state: FSMContext, sess
         program_start_date=None,
         onboarding_complete=True,
         status="pending",
-        trial_started_at=datetime.now(timezone.utc),
-        subscription_type="trial",
         # Блок 2
         q_goal=data.get("q_goal"),
         q_distance=data.get("q_distance"),

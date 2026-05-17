@@ -1,5 +1,5 @@
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -12,10 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from handlers.utils import safe_answer
 from keyboards.builders import (
-    kb_admin_application, kb_admin_approve, kb_admin_day_mode, kb_admin_delete_confirm,
-    kb_admin_level_picker, kb_admin_manage, kb_admin_mark_day_picker, kb_admin_mark_day_status,
-    kb_admin_menu, kb_admin_report_actions, kb_admin_report_users,
-    kb_admin_ref_detail, kb_admin_referrals,
+    kb_admin_access_choice, kb_admin_application, kb_admin_approve, kb_admin_day_mode,
+    kb_admin_delete_confirm, kb_admin_level_picker, kb_admin_manage, kb_admin_mark_day_picker,
+    kb_admin_mark_day_status, kb_admin_menu, kb_admin_payment_invite, kb_admin_report_actions,
+    kb_admin_report_users, kb_admin_ref_detail, kb_admin_referrals,
     kb_admin_start_choice, kb_coach_override_minutes, kb_completion_v2, kb_main_menu,
 )
 from services.user_service import UserService
@@ -1262,6 +1262,20 @@ async def cmd_set_level(message: Message, session: AsyncSession) -> None:
 
 # ── Approval callbacks ─────────────────────────────────────────────────────────
 
+def _parse_start_mode(start_mode: str) -> tuple[date, str, bool]:
+    """Parse start_mode ('today', 'tomorrow', or 'YYYYMMDD') into (start_date, start_label, is_today)."""
+    from datetime import timedelta as _td2
+    if start_mode == "today":
+        d = date.today()
+        return d, T.admin.start_today_word, True
+    if start_mode == "tomorrow":
+        d = date.today() + _td2(days=1)
+        return d, T.admin.start_tomorrow_word, False
+    # YYYYMMDD format (custom date from FSM)
+    d = datetime.strptime(start_mode, "%Y%m%d").date()
+    return d, d.strftime("%d.%m.%Y"), False
+
+
 async def _activate_user(
     callback: CallbackQuery,
     session: AsyncSession,
@@ -1269,9 +1283,10 @@ async def _activate_user(
     level: int,
     start_today: bool,
     custom_start_date: date | None = None,
+    give_trial: bool = False,
 ) -> None:
     """Activate user with given level and start date."""
-    from datetime import timedelta
+    from datetime import timedelta as _td
     user_svc = UserService(session)
     user = await user_svc.get(user_id)
 
@@ -1290,10 +1305,15 @@ async def _activate_user(
         start_date = date.today()
         start_label = T.admin.start_today_word
     else:
-        start_date = date.today() + timedelta(days=1)
+        start_date = date.today() + _td(days=1)
         start_label = T.admin.start_tomorrow_word
 
-    await user_svc.update(user, level=level, status="active", program_start_date=start_date)
+    update_kwargs: dict = {"level": level, "status": "active", "program_start_date": start_date}
+    if give_trial:
+        update_kwargs["trial_started_at"] = datetime.now(timezone.utc)
+        update_kwargs["subscription_type"] = "trial"
+
+    await user_svc.update(user, **update_kwargs)
     # Перечитываем user после update (refresh)
     user = await user_svc.get_or_raise(user_id)
 
@@ -1304,8 +1324,8 @@ async def _activate_user(
         try:
             await wk_plan_svc.create_first_week(user, anchor_date=start_date)
             logger.info(
-                "Admin %s activated user %s (level=%s, start=%s) — WeekPlan created",
-                callback.from_user.id, user_id, level, start_date,
+                "Admin %s activated user %s (level=%s, start=%s, trial=%s) — WeekPlan created",
+                callback.from_user.id, user_id, level, start_date, give_trial,
             )
         except Exception:
             logger.exception("Failed to create WeekPlan for user %s on activation", user_id)
@@ -1326,40 +1346,97 @@ async def _activate_user(
 
     level_name = LEVEL_NAMES[level]
 
-    await callback.message.edit_text(
-        callback.message.text + f"\n\n" + T.admin.activated_label.format(
+    if give_trial:
+        label_text = T.admin.trial_activated_label.format(
             level_name=level_name, level=level, start_label=start_label
-        ),
-        parse_mode="HTML",
-        reply_markup=None,
-    )
+        )
+    else:
+        label_text = T.admin.activated_label.format(
+            level_name=level_name, level=level, start_label=start_label
+        )
+
+    await callback.message.answer(label_text, parse_mode="HTML")
     await safe_answer(callback)
 
-    user_text = T.admin.user_activated_msg.format(level_name=level_name, start_label=start_label)
-    if start_today and not custom_start_date:
-        user_text += T.admin.user_activated_today_suffix
+    if give_trial:
+        user_text = T.admin.trial_welcome_msg
+        user_kb = kb_main_menu() if start_today else None
+    else:
+        user_text = T.admin.user_activated_msg.format(level_name=level_name, start_label=start_label)
+        if start_today and not custom_start_date:
+            user_text += T.admin.user_activated_today_suffix
+        user_kb = kb_main_menu() if (start_today and not custom_start_date) else None
+
     try:
         await callback.bot.send_message(
             chat_id=user_id,
             text=user_text,
             parse_mode="HTML",
-            reply_markup=kb_main_menu() if (start_today and not custom_start_date) else None,
+            reply_markup=user_kb,
         )
     except Exception:
         pass
 
 
-@router.callback_query(F.data.startswith("adm:approve:") & ~F.data.startswith("adm:approve:askdate:"))
-async def cb_approve(callback: CallbackQuery, session: AsyncSession) -> None:
-    """adm:approve:today:<user_id>:<level> or adm:approve:tomorrow:<user_id>:<level>"""
+@router.callback_query(F.data.startswith("adm:access:trial:"))
+async def cb_access_trial(callback: CallbackQuery, session: AsyncSession) -> None:
+    """adm:access:trial:<start_mode>:<user_id>:<level> — activate with trial."""
     if not is_admin(callback.from_user.id):
         await safe_answer(callback)
         return
 
     parts = callback.data.split(":")
-    start_today = parts[2] == "today"
+    start_mode, user_id, level = parts[3], int(parts[4]), int(parts[5])
+    start_date, _label, is_today = _parse_start_mode(start_mode)
+    is_tomorrow = start_mode == "tomorrow"
+    await _activate_user(
+        callback, session, user_id, level,
+        start_today=is_today,
+        custom_start_date=None if (is_today or is_tomorrow) else start_date,
+        give_trial=True,
+    )
+
+
+@router.callback_query(F.data.startswith("adm:access:payment:"))
+async def cb_access_payment(callback: CallbackQuery, session: AsyncSession) -> None:
+    """adm:access:payment:<start_mode>:<user_id>:<level> — send payment invite, no activation."""
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+
+    parts = callback.data.split(":")
+    user_id = int(parts[4])
+
+    await safe_answer(callback)
+    await callback.message.answer(T.admin.payment_invite_sent)
+
+    try:
+        await callback.bot.send_message(
+            chat_id=user_id,
+            text=T.admin.payment_invite_msg,
+            parse_mode="HTML",
+            reply_markup=kb_admin_payment_invite(),
+        )
+    except Exception as e:
+        logger.warning("Failed to send payment invite to user %s: %s", user_id, e)
+
+
+@router.callback_query(F.data.startswith("adm:approve:") & ~F.data.startswith("adm:approve:askdate:"))
+async def cb_approve(callback: CallbackQuery) -> None:
+    """adm:approve:today:<user_id>:<level> or adm:approve:tomorrow:<user_id>:<level>
+    Shows intermediate step: trial or payment."""
+    if not is_admin(callback.from_user.id):
+        await safe_answer(callback)
+        return
+
+    parts = callback.data.split(":")
+    start_mode = parts[2]  # "today" or "tomorrow"
     user_id, level = int(parts[3]), int(parts[4])
-    await _activate_user(callback, session, user_id, level, start_today)
+    await safe_answer(callback)
+    await callback.message.answer(
+        T.admin.access_choice_text,
+        reply_markup=kb_admin_access_choice(user_id, level, start_mode),
+    )
 
 
 @router.callback_query(F.data.startswith("adm:approve:askdate:"))
@@ -1383,7 +1460,7 @@ async def cb_approve_ask_date(callback: CallbackQuery, state: FSMContext) -> Non
 
 
 @router.message(AdminActionStates.activate_on_date)
-async def admin_activate_date_input(message: Message, state: FSMContext, session: AsyncSession) -> None:
+async def admin_activate_date_input(message: Message, state: FSMContext) -> None:
     if not is_admin(message.from_user.id):
         return
 
@@ -1399,41 +1476,11 @@ async def admin_activate_date_input(message: Message, state: FSMContext, session
 
     await state.clear()
 
-    # Эмулируем CallbackQuery объект для переиспользования _activate_user
-    # Вместо этого — прямая активация без edit_text
-    from services.user_service import UserService
-    from services.week_plan_service import WeekPlanService
-
-    user_svc = UserService(session)
-    user = await user_svc.get(user_id)
-    if not user or user.status == "active":
-        await message.answer("⚠️ Пользователь не найден или уже активен.")
-        return
-
-    await user_svc.update(user, level=level, status="active", program_start_date=custom_date)
-    user = await user_svc.get_or_raise(user_id)
-
-    if level <= 3 and user.current_period is not None:
-        wk_plan_svc = WeekPlanService(session)
-        try:
-            await wk_plan_svc.create_first_week(user, anchor_date=custom_date)
-        except Exception:
-            logger.exception("Failed to create WeekPlan for user %s on activation", user_id)
-
-    level_name = LEVEL_NAMES[level]
-    start_label = custom_date.strftime("%d.%m.%Y")
+    start_mode = custom_date.strftime("%Y%m%d")  # encode date as YYYYMMDD for callback
     await message.answer(
-        T.admin.activated_label.format(level_name=level_name, level=level, start_label=start_label),
-        parse_mode="HTML",
+        T.admin.access_choice_text,
+        reply_markup=kb_admin_access_choice(user_id, level, start_mode),
     )
-    try:
-        await message.bot.send_message(
-            chat_id=user_id,
-            text=T.admin.user_activated_msg.format(level_name=level_name, start_label=start_label),
-            parse_mode="HTML",
-        )
-    except Exception:
-        pass
 
 
 @router.callback_query(F.data.startswith("adm:pick:"))
